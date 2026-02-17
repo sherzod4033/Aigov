@@ -1,0 +1,68 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Manrope:wght@600;700;800&display=swap');
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+  --app-primary: #1f3a60;
+  --app-primary-strong: #162945;
+  --app-gold: #c5a059;
+  --app-bg: #f3f5f8;
+  --app-surface: #ffffff;
+  --app-border: #dfe4ee;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  background: var(--app-bg);
+  color: #1f2937;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: 'Manrope', 'Plus Jakarta Sans', sans-serif;
+}
+
+.login-pattern {
+  background-color: #18355c;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+  background-size: 26px 26px;
+}
+
+.soft-grid {
+  background-color: var(--app-bg);
+  background-image:
+    linear-gradient(rgba(31, 58, 96, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(31, 58, 96, 0.03) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.scrollbar-soft::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.scrollbar-soft::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: #c7cfdd;
+}
+
+.scrollbar-soft::-webkit-scrollbar-track {
+  background: transparent;
+}

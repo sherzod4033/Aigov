@@ -1,0 +1,43 @@
+# Root .gitignore for SoliqAI project
+
+# Backend
+backend/.env
+backend/.env.local
+backend/__pycache__/
+backend/**/*.py[cod]
+backend/**/*$py.class
+backend/**/*.so
+backend/venv/
+backend/env/
+backend/.venv/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.local
+frontend/.cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Database
+*.sqlite3
+*.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp

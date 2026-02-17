@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: soliqai-postgres
+    environment:
+      POSTGRES_USER: soliqai_user
+      POSTGRES_PASSWORD: soliqai_password
+      POSTGRES_DB: soliqai_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U soliqai_user -d soliqai_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: soliqai-chromadb
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - PERSIST_DIRECTORY=/chroma/chroma
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: soliqai-backend
+    ports:
+      - "8001:8001"
+    environment:
+      - ENVIRONMENT=production
+      - POSTGRES_SERVER=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=soliqai_user
+      - POSTGRES_PASSWORD=soliqai_password
+      - POSTGRES_DB=soliqai_db
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+      - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4.1-mini}
+      - CORS_ORIGINS=http://localhost:5173,http://localhost:4173
+    depends_on:
+      postgres:
+        condition: service_healthy
+      chromadb:
+        condition: service_started
+    volumes:
+      - ./backend/data:/app/data
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8001 --workers 2
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: soliqai-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  chroma_data:
