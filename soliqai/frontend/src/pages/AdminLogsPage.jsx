@@ -93,10 +93,10 @@ const AdminLogsPage = () => {
         setIsAddingFAQ(log.id);
         try {
             await logsService.addToFaq(log.id, { category: 'from_logs', priority: 0 });
-            alert('Added to FAQ');
+            alert('Добавлено в FAQ');
         } catch (error) {
             console.error('Failed to add log to FAQ', error);
-            alert(error.response?.data?.detail || 'Failed to add to FAQ');
+            alert(error.response?.data?.detail || 'Не удалось добавить в FAQ');
         } finally {
             setIsAddingFAQ(null);
         }
@@ -122,10 +122,10 @@ const AdminLogsPage = () => {
         <div className="space-y-6">
             <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                    <h2 className="text-3xl font-extrabold text-[#1f3a60]">Logs & Analytics</h2>
+                    <h2 className="text-3xl font-extrabold text-[#1f3a60]">Логи и Аналитика</h2>
                     <div className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
                         <span className="h-2 w-2 rounded-full bg-green-500"></span>
-                        System Status: Operational
+                        Статус системы: Работает
                     </div>
                 </div>
 
@@ -133,7 +133,7 @@ const AdminLogsPage = () => {
                     <Input
                         value={query}
                         onChange={(event) => setQuery(event.target.value)}
-                        placeholder="Search by question or request ID..."
+                        placeholder="Поиск по вопросу или ID запроса..."
                         className="min-w-[220px] flex-1"
                     />
 
@@ -142,58 +142,58 @@ const AdminLogsPage = () => {
 
                     <Button type="button" variant="outline" onClick={applyDateFilter}>
                         <Filter className="h-4 w-4" />
-                        Filters
+                        Фильтры
                     </Button>
 
                     <Button type="button" variant="secondary">
                         <Download className="h-4 w-4" />
-                        Export Report
+                        Экспорт отчета
                     </Button>
 
                     <Button type="button" variant="ghost" onClick={resetDateFilter}>
-                        Reset
+                        Сброс
                     </Button>
                 </div>
             </section>
 
             <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <div className="rounded-2xl bg-[#1f3a60] p-5 text-white shadow-md">
-                    <p className="text-xs font-semibold uppercase tracking-[0.08em] text-white/70">Total Requests</p>
+                    <p className="text-xs font-semibold uppercase tracking-[0.08em] text-white/70">Всего запросов</p>
                     <p className="mt-1 text-4xl font-extrabold">{totalChats}</p>
-                    <p className="mt-2 text-xs text-white/70">Tracked conversations</p>
+                    <p className="mt-2 text-xs text-white/70">Отслеживаемые диалоги</p>
                 </div>
 
                 <div className="rounded-2xl bg-[#1f3a60] p-5 text-white shadow-md">
                     <div className="flex items-center justify-between">
-                        <p className="text-xs font-semibold uppercase tracking-[0.08em] text-white/70">Positive Feedback</p>
+                        <p className="text-xs font-semibold uppercase tracking-[0.08em] text-white/70">Положительные отзывы</p>
                         <ThumbsUp className="h-4 w-4 text-emerald-300" />
                     </div>
                     <p className="mt-1 text-4xl font-extrabold">{positiveFeedback}</p>
-                    <p className="mt-2 text-xs text-white/70">Helpful responses</p>
+                    <p className="mt-2 text-xs text-white/70">Полезные ответы</p>
                 </div>
 
                 <div className="rounded-2xl bg-[#1f3a60] p-5 text-white shadow-md">
                     <div className="flex items-center justify-between">
-                        <p className="text-xs font-semibold uppercase tracking-[0.08em] text-white/70">Avg Response Time</p>
+                        <p className="text-xs font-semibold uppercase tracking-[0.08em] text-white/70">Среднее время ответа</p>
                         <Timer className="h-4 w-4 text-[#c5a059]" />
                     </div>
                     <p className="mt-1 text-4xl font-extrabold">{avgResponseSeconds}s</p>
-                    <p className="mt-2 text-xs text-emerald-200">Optimal</p>
+                    <p className="mt-2 text-xs text-emerald-200">Оптимально</p>
                 </div>
 
                 <div className="rounded-2xl bg-[#1f3a60] p-5 text-white shadow-md">
                     <div className="flex items-center justify-between">
-                        <p className="text-xs font-semibold uppercase tracking-[0.08em] text-white/70">Negative Feedback</p>
+                        <p className="text-xs font-semibold uppercase tracking-[0.08em] text-white/70">Отрицательные отзывы</p>
                         <ThumbsDown className="h-4 w-4 text-rose-300" />
                     </div>
                     <p className="mt-1 text-4xl font-extrabold">{negativeFeedback}</p>
-                    <p className="mt-2 text-xs text-white/70">Needs improvement</p>
+                    <p className="mt-2 text-xs text-white/70">Требует улучшения</p>
                 </div>
             </section>
 
             {Array.isArray(analytics?.top_questions) && analytics.top_questions.length > 0 && (
                 <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                    <h3 className="text-lg font-bold text-[#1f3a60]">Top Questions</h3>
+                    <h3 className="text-lg font-bold text-[#1f3a60]">Топ вопросов</h3>
                     <div className="mt-3 flex flex-wrap gap-2">
                         {analytics.top_questions.map((item) => (
                             <span key={item.question} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-600">
@@ -207,31 +207,31 @@ const AdminLogsPage = () => {
 
             <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                 <div className="border-b border-slate-200 px-5 py-4">
-                    <h3 className="text-lg font-bold text-[#1f3a60]">Recent Chats</h3>
-                    <p className="mt-1 text-sm text-slate-500">Showing {filteredLogs.length} of {logs.length} entries</p>
+                    <h3 className="text-lg font-bold text-[#1f3a60]">Недавние чаты</h3>
+                    <p className="mt-1 text-sm text-slate-500">Показано {filteredLogs.length} из {logs.length} записей</p>
                 </div>
 
                 <div className="overflow-x-auto">
                     <table className="w-full min-w-[980px] text-left">
                         <thead className="bg-slate-50 text-xs uppercase tracking-[0.08em] text-slate-500">
                             <tr>
-                                <th className="px-5 py-3 font-semibold">Question</th>
-                                <th className="px-5 py-3 font-semibold">Source count</th>
-                                <th className="px-5 py-3 font-semibold">Response time</th>
-                                <th className="px-5 py-3 font-semibold">Feedback</th>
-                                <th className="px-5 py-3 font-semibold">Created</th>
-                                <th className="px-5 py-3 text-right font-semibold">Actions</th>
+                                <th className="px-5 py-3 font-semibold">Вопрос</th>
+                                <th className="px-5 py-3 font-semibold">Кол-во источников</th>
+                                <th className="px-5 py-3 font-semibold">Время ответа</th>
+                                <th className="px-5 py-3 font-semibold">Отзыв</th>
+                                <th className="px-5 py-3 font-semibold">Создано</th>
+                                <th className="px-5 py-3 text-right font-semibold">Действия</th>
                             </tr>
                         </thead>
 
                         <tbody>
                             {isLoading ? (
                                 <tr>
-                                    <td colSpan="6" className="px-5 py-10 text-center text-sm text-slate-500">Loading...</td>
+                                    <td colSpan="6" className="px-5 py-10 text-center text-sm text-slate-500">Загрузка...</td>
                                 </tr>
                             ) : filteredLogs.length === 0 ? (
                                 <tr>
-                                    <td colSpan="6" className="px-5 py-10 text-center text-sm text-slate-500">No logs found</td>
+                                    <td colSpan="6" className="px-5 py-10 text-center text-sm text-slate-500">Логи не найдены</td>
                                 </tr>
                             ) : (
                                 filteredLogs.map((log) => {
@@ -255,7 +255,7 @@ const AdminLogsPage = () => {
 
                                             <td className="px-5 py-3">
                                                 <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
-                                                    {sourceCount} {sourceCount === 1 ? 'source' : 'sources'}
+                                                    {sourceCount} ист.
                                                 </span>
                                             </td>
 
@@ -282,7 +282,7 @@ const AdminLogsPage = () => {
                                                     disabled={isAddingFAQ === log.id}
                                                 >
                                                     <PlusCircle className="h-4 w-4" />
-                                                    {isAddingFAQ === log.id ? 'Adding...' : 'Add to FAQ'}
+                                                    {isAddingFAQ === log.id ? 'Добавление...' : 'Добавить в FAQ'}
                                                 </Button>
                                             </td>
                                         </tr>

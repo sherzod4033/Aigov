@@ -96,7 +96,7 @@ const AdminFAQPage = () => {
     };
 
     const handleDelete = async (id) => {
-        if (!window.confirm('Are you sure?')) return;
+        if (!window.confirm('Вы уверены?')) return;
 
         try {
             await faqService.delete(id);
@@ -141,11 +141,11 @@ const AdminFAQPage = () => {
                                 value={searchQuery}
                                 onChange={(event) => setSearchQuery(event.target.value)}
                                 className="pl-9"
-                                placeholder="Search by keyword or ID..."
+                                placeholder="Поиск по ключевому слову или ID..."
                             />
                         </div>
                         <Button type="button" variant="outline" onClick={applyFilters} className="shrink-0">
-                            Search
+                            Поиск
                         </Button>
                     </div>
 
@@ -158,7 +158,7 @@ const AdminFAQPage = () => {
                                 categoryFilter === '' ? 'bg-[#1f3a60] text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                             )}
                         >
-                            All FAQs
+                            Все FAQ
                             <span className="ml-1 rounded bg-white/25 px-1.5 py-0.5 text-[10px]">{faqs.length}</span>
                         </button>
 
@@ -183,11 +183,11 @@ const AdminFAQPage = () => {
                 <div className="scrollbar-soft flex-1 space-y-3 overflow-y-auto bg-slate-50 p-3">
                     {isLoading ? (
                         <div className="rounded-xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-500">
-                            Loading FAQs...
+                            Загрузка FAQ...
                         </div>
                     ) : visibleFaqs.length === 0 ? (
                         <div className="rounded-xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-500">
-                            No FAQs found
+                            FAQ не найдены
                         </div>
                     ) : (
                         visibleFaqs.map((faq) => {
@@ -204,7 +204,7 @@ const AdminFAQPage = () => {
                                 >
                                     <div className="mb-2 flex items-center justify-between gap-2">
                                         <span className="rounded bg-blue-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-blue-700">
-                                            {faq.category || 'General'}
+                                            {faq.category || 'Общее'}
                                         </span>
 
                                         <div className="flex items-center gap-0.5">
@@ -260,7 +260,7 @@ const AdminFAQPage = () => {
 
                 <div className="border-t border-slate-200 p-3">
                     <Button type="button" variant="ghost" className="w-full" onClick={resetFilters}>
-                        Reset filters
+                        Сбросить фильтры
                     </Button>
                 </div>
             </section>
@@ -269,19 +269,19 @@ const AdminFAQPage = () => {
                 <div className="h-full overflow-y-auto p-6">
                     <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
                         <div>
-                            <h2 className="text-3xl font-extrabold text-[#1f3a60]">{editingId ? 'Edit FAQ Entry' : 'Create FAQ Entry'}</h2>
-                            <p className="mt-1 text-sm text-slate-500">Update your knowledge base and keep answers synchronized with the AI model.</p>
+                            <h2 className="text-3xl font-extrabold text-[#1f3a60]">{editingId ? 'Редактировать запись FAQ' : 'Создать запись FAQ'}</h2>
+                            <p className="mt-1 text-sm text-slate-500">Обновите базу знаний и синхронизируйте ответы с моделью ИИ.</p>
                         </div>
 
                         <div className="flex items-center gap-2">
                             {editingId && (
                                 <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold uppercase tracking-wide text-emerald-700">
-                                    Published
+                                    Опубликовано
                                 </span>
                             )}
                             <Button type="button" variant="outline" onClick={handleCancel}>
                                 <X className="h-4 w-4" />
-                                New entry
+                                Новая запись
                             </Button>
                         </div>
                     </div>
@@ -295,24 +295,24 @@ const AdminFAQPage = () => {
 
                         <div>
                             <label className="mb-2 block text-sm font-semibold text-slate-700">
-                                Question <span className="text-red-500">*</span>
+                                Вопрос <span className="text-red-500">*</span>
                             </label>
                             <textarea
                                 className="min-h-[88px] w-full resize-none rounded-lg border border-slate-300 px-4 py-3 text-sm text-slate-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-[#1f3a60]/25"
-                                placeholder="Enter the frequently asked question..."
+                                placeholder="Введите часто задаваемый вопрос..."
                                 {...register('question', { required: true })}
                             />
-                            <p className="mt-1 text-xs text-slate-400">Be specific. This text drives semantic search quality.</p>
+                            <p className="mt-1 text-xs text-slate-400">Будьте конкретны. Этот текст влияет на качество семантического поиска.</p>
                         </div>
 
                         <div className="grid gap-5 md:grid-cols-2">
                             <div>
-                                <label className="mb-2 block text-sm font-semibold text-slate-700">Category</label>
+                                <label className="mb-2 block text-sm font-semibold text-slate-700">Категория</label>
                                 <Input placeholder="Taxation" {...register('category')} />
                             </div>
 
                             <div>
-                                <label className="mb-2 block text-sm font-semibold text-slate-700">Relevance Priority (1-5)</label>
+                                <label className="mb-2 block text-sm font-semibold text-slate-700">Приоритет релевантности (1-5)</label>
                                 <div className="flex items-center gap-1">
                                     {Array.from({ length: 5 }).map((_, idx) => {
                                         const value = idx + 1;
@@ -341,7 +341,7 @@ const AdminFAQPage = () => {
 
                         <div>
                             <label className="mb-2 block text-sm font-semibold text-slate-700">
-                                Answer <span className="text-red-500">*</span>
+                                Ответ <span className="text-red-500">*</span>
                             </label>
 
                             <div className="flex items-center gap-1 rounded-t-lg border border-b-0 border-slate-300 bg-slate-50 px-2 py-1">
@@ -355,7 +355,7 @@ const AdminFAQPage = () => {
 
                             <textarea
                                 className="min-h-[220px] w-full rounded-b-lg border border-slate-300 px-4 py-3 text-sm leading-relaxed text-slate-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-[#1f3a60]/25"
-                                placeholder="Provide a complete legal answer..."
+                                placeholder="Введите полный юридический ответ..."
                                 {...register('answer', { required: true })}
                             />
                         </div>
@@ -364,14 +364,14 @@ const AdminFAQPage = () => {
                             {editingId && (
                                 <Button type="button" variant="destructive" onClick={() => handleDelete(editingId)}>
                                     <Trash2 className="h-4 w-4" />
-                                    Delete
+                                    Удалить
                                 </Button>
                             )}
                             <Button type="button" variant="outline" onClick={handleCancel}>
-                                Cancel
+                                Отмена
                             </Button>
                             <Button type="submit">
-                                {editingId ? 'Save Changes' : 'Create FAQ'}
+                                {editingId ? 'Сохранить изменения' : 'Создать FAQ'}
                             </Button>
                         </div>
                     </form>

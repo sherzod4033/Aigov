@@ -36,7 +36,7 @@ const LoginPage = () => {
             navigate('/');
         } catch (err) {
             console.error(err);
-            setError('Номи корбар ё рамз нодуруст аст');
+            setError('Неверное имя пользователя или пароль');
         } finally {
             setIsLoading(false);
         }
@@ -65,7 +65,7 @@ const LoginPage = () => {
                                 </div>
                                 <div className="text-left">
                                     <p className="text-4xl font-extrabold leading-none text-[#1f3a60]">Soliq<span className="text-[#c5a059]">AI</span></p>
-                                    <p className="mt-1 text-sm font-semibold text-slate-500">Ёвари андозии зирак</p>
+                                    <p className="mt-1 text-sm font-semibold text-slate-500">Умный налоговый помощник</p>
                                 </div>
                             </div>
                         </CardHeader>
@@ -74,7 +74,7 @@ const LoginPage = () => {
                             <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
                                 <div>
                                     <label htmlFor="username" className="mb-1 block text-sm font-semibold text-[#1f3a60]">
-                                        Номи корбар
+                                        Имя пользователя
                                     </label>
                                     <div className="relative">
                                         <User className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -82,7 +82,7 @@ const LoginPage = () => {
                                             id="username"
                                             className="h-11 pl-9"
                                             placeholder="user@soliq.tj"
-                                            {...register('username', { required: 'Номи корбарро ворид кунед' })}
+                                            {...register('username', { required: 'Введите имя пользователя' })}
                                         />
                                     </div>
                                     {errors.username && <p className="mt-1 text-xs font-medium text-red-600">{errors.username.message}</p>}
@@ -90,7 +90,7 @@ const LoginPage = () => {
 
                                 <div>
                                     <label htmlFor="password" className="mb-1 block text-sm font-semibold text-[#1f3a60]">
-                                        Рамз
+                                        Пароль
                                     </label>
                                     <div className="relative">
                                         <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -99,13 +99,13 @@ const LoginPage = () => {
                                             type={showPassword ? 'text' : 'password'}
                                             className="h-11 pl-9 pr-10"
                                             placeholder="••••••••"
-                                            {...register('password', { required: 'Рамзро ворид кунед' })}
+                                            {...register('password', { required: 'Введите пароль' })}
                                         />
                                         <button
                                             type="button"
                                             onClick={() => setShowPassword((prev) => !prev)}
                                             className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                                            aria-label={showPassword ? 'Hide password' : 'Show password'}
+                                            aria-label={showPassword ? 'Скрыть пароль' : 'Показать пароль'}
                                         >
                                             {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                                         </button>
@@ -119,7 +119,7 @@ const LoginPage = () => {
                                         Дар хотир нигоҳ дор
                                     </label>
                                     <button type="button" className="font-semibold text-[#1f3a60] hover:text-[#162945]">
-                                        Фаромӯш кардед?
+                                        Забыли пароль?
                                     </button>
                                 </div>
 
@@ -130,16 +130,16 @@ const LoginPage = () => {
                                 )}
 
                                 <Button type="submit" className="h-11 w-full text-[13px] tracking-[0.08em]" isLoading={isLoading}>
-                                    ВОРИД ШУДАН
+                                    ВОЙТИ
                                 </Button>
                             </form>
                         </CardContent>
 
                         <CardFooter className="justify-center border-t border-slate-100 pb-7 pt-5 text-sm text-slate-500">
                             <span>
-                                Мушкилӣ доред?{' '}
+                                Нужна помощь?{' '}
                                 <Link to="/register" className="font-semibold text-[#1f3a60] hover:text-[#162945]">
-                                    Дастгирии техникӣ
+                                    Техническая поддержка
                                 </Link>
                             </span>
                         </CardFooter>
@@ -147,7 +147,7 @@ const LoginPage = () => {
                 </main>
 
                 <footer className="pb-2 text-center text-xs font-medium text-white/55">
-                    © 2026 Хукумати Ҷумҳурии Тоҷикистон. Ҳамаи ҳуқуқҳо ҳифз шудаанд.
+                    © 2026 Правительство Республики Таджикистан. Все права защищены.
                 </footer>
             </div>
         </div>

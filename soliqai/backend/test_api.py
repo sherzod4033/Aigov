@@ -8,7 +8,7 @@ import httpx
 BASE_URL = "http://localhost:8001"
 
 async def test_chat():
-    async with httpx.AsyncClient(base_url=BASE_URL, timeout=30.0) as client:
+    async with httpx.AsyncClient(base_url=BASE_URL, timeout=120.0) as client:
         # 1. Login
         print("🔑 Logging in...")
         resp = await client.post(

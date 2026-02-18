@@ -8,21 +8,21 @@ import { cn } from '../lib/utils';
 
 const INITIAL_ASSISTANT_MESSAGE = {
     role: 'assistant',
-    content: 'Салом! Ман SoliqAI, ёрдамчии шумо оид ба андоз. Ба ман савол диҳед.\nЗдравствуйте! Я SoliqAI, ваш налоговый помощник. Задавайте вопросы.',
+    content: 'Здравствуйте! Я SoliqAI, ваш налоговый помощник. Задавайте вопросы.',
 };
 
 const QUICK_QUESTIONS = [
-    'How to pay VAT?',
-    'Patent tax rates 2024',
-    'Чӣ тавр андоз супорам?',
-    'Find local office',
+    'Как оплатить НДС?',
+    'Ставки налога на патент 2024',
+    'Как сдать налоговую декларацию?',
+    'Найти ближайшую налоговую инспекцию',
 ];
 
 const CHAT_HISTORY_STORAGE_PREFIX = 'soliqai.chat.history.';
 const MAX_PERSISTED_MESSAGES = 100;
 const PENDING_MESSAGE_TTL_MS = 120000;
-const PENDING_PLACEHOLDER_TEXT = 'Thinking...';
-const INTERRUPTED_PENDING_TEXT = 'Запрос был прерван при смене раздела. Отправьте вопрос снова.\nДархост ҳангоми иваз кардани бахш қатъ шуд. Саволро дубора ирсол кунед.';
+const PENDING_PLACEHOLDER_TEXT = 'Думаю...';
+const INTERRUPTED_PENDING_TEXT = 'Запрос был прерван при смене раздела. Отправьте вопрос снова.';
 
 const resolveCurrentUsername = () => {
     if (typeof window === 'undefined') return 'anonymous';
@@ -302,9 +302,9 @@ const ChatPage = () => {
             console.error(error);
             // Check if it's an authentication error
             const isAuthError = error.response?.status === 403 || error.response?.status === 401;
-            const errorContent = isAuthError 
-                ? 'Сессияи шумо ба охир расид. Лутфан аз нав ворид шавед.\nВаша сессия истекла. Пожалуйста, войдите снова.'
-                : 'Sorry, I encountered an error processing your request.';
+            const errorContent = isAuthError
+                ? 'Ваша сессия истекла. Пожалуйста, войдите снова.'
+                : 'Извините, произошла ошибка при обработке вашего запроса.';
             const errorMessage = { role: 'assistant', content: errorContent };
             const stored = loadMessagesFromStorage(chatStorageKey);
             const storageUpdated = replacePendingMessageByRequestId(stored, requestId, errorMessage);
@@ -349,7 +349,7 @@ const ChatPage = () => {
         return (
             <details className="mt-3 rounded-lg border border-slate-200 bg-white/70 px-3 py-2 text-xs text-slate-500">
                 <summary className="cursor-pointer list-none font-semibold uppercase tracking-[0.08em] text-[#1f3a60]">
-                    Legal Sources & References
+                    Правовые источники и ссылки
                 </summary>
                 <div className="mt-2 space-y-1.5">
                     {sources.map((source, sourceIdx) => {
@@ -376,7 +376,7 @@ const ChatPage = () => {
                         {formatTodayLabel()}
                     </div>
                     <Button variant="ghost" size="sm" onClick={handleClearChat} disabled={hasPendingMessage}>
-                        Clear chat
+                        Очистить чат
                     </Button>
                 </div>
 
@@ -466,7 +466,7 @@ const ChatPage = () => {
                         <Paperclip className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                         <Input
                             className="h-12 rounded-xl border-slate-300 bg-slate-50 pl-10 pr-14 focus:bg-white"
-                            placeholder="Type your question about tax legislation..."
+                            placeholder="Введите ваш вопрос о налоговом законодательстве..."
                             autoComplete="off"
                             {...register('message')}
                         />
@@ -481,7 +481,7 @@ const ChatPage = () => {
                     </form>
 
                     <p className="mt-2 text-center text-[11px] font-medium text-slate-400">
-                        SoliqAI can make mistakes. Verify important information with the official Tax Code of Tajikistan.
+                        SoliqAI может ошибаться. Проверяйте важную информацию в официальном Налоговом кодексе Таджикистана.
                     </p>
                 </div>
             </div>

@@ -15,31 +15,31 @@ import {
 import { cn } from '../../lib/utils';
 
 const NAV_ITEMS = [
-    { name: 'Chat', href: '/', icon: MessageSquare },
-    { name: 'Documents', href: '/admin/documents', icon: FileText },
+    { name: 'Чат', href: '/', icon: MessageSquare },
+    { name: 'Документы', href: '/admin/documents', icon: FileText },
     { name: 'FAQ', href: '/admin/faq', icon: CircleHelp },
-    { name: 'Logs', href: '/admin/logs', icon: ChartNoAxesCombined },
-    { name: 'Settings', href: '/settings', icon: Settings },
+    { name: 'Логи', href: '/admin/logs', icon: ChartNoAxesCombined },
+    { name: 'Настройки', href: '/settings', icon: Settings },
 ];
 
 const resolvePageMeta = (pathname) => {
     if (pathname === '/') {
-        return { title: 'SoliqAI', badge: 'Tax Assistant', searchPlaceholder: 'Type your question...' };
+        return { title: 'SoliqAI', badge: 'Налоговый помощник', searchPlaceholder: 'Введите ваш вопрос...' };
     }
     if (pathname.startsWith('/admin/documents')) {
-        return { title: 'Documents', badge: 'Document Hub', searchPlaceholder: 'Search documents...' };
+        return { title: 'Документы', badge: 'Центр документов', searchPlaceholder: 'Поиск документов...' };
     }
     if (pathname.startsWith('/admin/faq')) {
-        return { title: 'FAQ Management', badge: 'Knowledge Base', searchPlaceholder: 'Search FAQ by keyword...' };
+        return { title: 'Управление FAQ', badge: 'База знаний', searchPlaceholder: 'Поиск по ключевым словам...' };
     }
     if (pathname.startsWith('/admin/logs')) {
-        return { title: 'Logs & Analytics', badge: 'Monitoring', searchPlaceholder: 'Search request ID...' };
+        return { title: 'Логи и Аналитика', badge: 'Мониторинг', searchPlaceholder: 'Поиск по ID запроса...' };
     }
     if (pathname.startsWith('/settings')) {
-        return { title: 'Settings', badge: 'Runtime', searchPlaceholder: 'Search users or roles...' };
+        return { title: 'Настройки', badge: 'Система', searchPlaceholder: 'Поиск пользователей...' };
     }
 
-    return { title: 'SoliqAI', badge: 'Portal', searchPlaceholder: 'Search...' };
+    return { title: 'SoliqAI', badge: 'Портал', searchPlaceholder: 'Поиск...' };
 };
 
 const isActiveLink = (pathname, href) => pathname === href || (href !== '/' && pathname.startsWith(`${href}/`));
@@ -104,7 +104,7 @@ const Layout = () => {
                         className="flex w-full items-center justify-center gap-2 rounded-lg border border-white/20 px-3 py-2 text-sm font-semibold text-white transition hover:bg-white/10"
                     >
                         <LogOut className="h-4 w-4" />
-                        Logout
+                        Выйти
                     </button>
                 </div>
             </aside>
@@ -141,7 +141,7 @@ const Layout = () => {
 
                             <div className="hidden items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500 xl:flex">
                                 <span className="mr-2 inline-block h-2 w-2 rounded-full bg-green-500"></span>
-                                System operational
+                                Система работает
                             </div>
 
                             <button type="button" className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50 hover:text-[#1f3a60]">
