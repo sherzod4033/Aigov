@@ -25,13 +25,49 @@ check_postgres() {
 
 # Check if postgres is running
 if ! check_postgres; then
-    echo "❌ PostgreSQL is not running. Please start it first:"
-    echo "   sudo service postgresql start"
-    if ! command -v pg_isready >/dev/null 2>&1; then
-        echo "ℹ️  Optional: install pg_isready for better checks:"
-        echo "   sudo apt install postgresql-client"
+    echo "❌ PostgreSQL is not reachable."
+    echo "🔄 Attempting to start/resume Docker services..."
+
+    # Start/Run PostgreSQL
+    if docker ps -a --format '{{.Names}}' | grep -q "^soliqai-postgres$"; then
+        echo "   Starting existing soliqai-postgres container..."
+        docker start soliqai-postgres >/dev/null
+    else
+        echo "   Creating and starting new soliqai-postgres container..."
+        docker run --name soliqai-postgres \
+            -e POSTGRES_PASSWORD=soliqai_password \
+            -e POSTGRES_USER=soliqai_user \
+            -e POSTGRES_DB=soliqai_db \
+            -p 5432:5432 \
+            -v postgres_data:/var/lib/postgresql/data \
+            -d postgres:15.2-alpine >/dev/null
     fi
-    exit 1
+
+    # Start/Run ChromaDB (check independently or just ensure it is running)
+    if docker ps -a --format '{{.Names}}' | grep -q "^soliqai-chromadb$"; then
+         if ! docker ps --format '{{.Names}}' | grep -q "^soliqai-chromadb$"; then
+            echo "   Starting existing soliqai-chromadb container..."
+            docker start soliqai-chromadb >/dev/null
+         fi
+    else
+        echo "   Creating and starting new soliqai-chromadb container..."
+        docker run --name soliqai-chromadb \
+            -p 8000:8000 \
+            -v chroma_data:/chroma/chroma \
+            -e IS_PERSISTENT=TRUE \
+            -e PERSIST_DIRECTORY=/chroma/chroma \
+            -d chromadb/chroma:latest >/dev/null
+    fi
+
+    echo "⏳ Waiting for services to initialize..."
+    sleep 5
+    
+    # Re-check
+    if ! check_postgres; then
+         echo "❌ Failed to start PostgreSQL. Please check docker logs."
+         exit 1
+    fi
+    echo "✅ Services started successfully."
 fi
 
 echo "✅ PostgreSQL is running ($POSTGRES_HOST:$POSTGRES_PORT)"
@@ -48,6 +84,9 @@ fi
 echo "🐍 Starting Backend..."
 cd backend
 source venv/bin/activate
+# Initialize DB
+echo "📦 Initializing Database..."
+python -m app.init_db >/dev/null 2>&1
 python run.py --reload &
 BACKEND_PID=$!
 cd ..

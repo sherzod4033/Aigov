@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:15.2-alpine
     container_name: soliqai-postgres
     environment:
       POSTGRES_USER: soliqai_user
