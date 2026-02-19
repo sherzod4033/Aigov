@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import {
     AlertTriangle,
@@ -85,8 +86,11 @@ const AdminDocumentsPage = () => {
     const [isUploading, setIsUploading] = useState(false);
     const [uploadError, setUploadError] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
-    const [searchTerm, setSearchTerm] = useState('');
     const [isDragActive, setIsDragActive] = useState(false);
+
+    // Поиск читаем из URL param ?q= (устанавливается хедером)
+    const [searchParams] = useSearchParams();
+    const searchTerm = searchParams.get('q') || '';
     const [draggedFiles, setDraggedFiles] = useState([]);
     const [chunksModal, setChunksModal] = useState({
         isOpen: false,
@@ -311,21 +315,6 @@ const AdminDocumentsPage = () => {
     return (
         <div className="space-y-6 px-4">
             <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                        <h2 className="text-3xl font-extrabold text-[#1f3a60]">Документы</h2>
-                        <span className="rounded-full bg-[#1f3a60]/10 px-3 py-1 text-xs font-bold text-[#1f3a60]">
-                            {documents.length} Файлов
-                        </span>
-                    </div>
-
-                    <input
-                        value={searchTerm}
-                        onChange={(event) => setSearchTerm(event.target.value)}
-                        placeholder="Поиск документов..."
-                        className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#1f3a60]/30 sm:w-72"
-                    />
-                </div>
 
                 <div
                     onDragEnter={handleDragEnter}

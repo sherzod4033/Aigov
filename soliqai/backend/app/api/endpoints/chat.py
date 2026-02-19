@@ -12,7 +12,7 @@ from sqlmodel import select
 from app.api import deps
 from app.core.rate_limit import chat_limiter, check_rate_limit
 from app.models.models import User, Log, Document
-from app.services.rag_service import RAGService
+from app.services.rag_service import RAGService, RELEVANCE_DISTANCE_THRESHOLD
 from app.services.runtime_settings_service import RuntimeSettingsService
 
 logger = logging.getLogger(__name__)
@@ -105,7 +105,7 @@ def _select_relevant_chunks(
 
     # Filter by semantic distance ONLY.
     # Distance <= 1.8 is considered "relevant" in this configuration.
-    relevant = [item for item in candidates if item["distance"] is not None and item["distance"] <= 1.8]
+    relevant = [item for item in candidates if item["distance"] is not None and item["distance"] <= RELEVANCE_DISTANCE_THRESHOLD]
     
     # Sort by closest distance
     relevant.sort(key=lambda x: x["distance"])

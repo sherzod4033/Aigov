@@ -7,6 +7,7 @@ python-multipart
 pymupdf
 pytesseract
 chromadb
+sentence-transformers
 ollama
 openai
 python-dotenv

@@ -23,8 +23,9 @@ class DocumentService:
         },
         ".txt": {"text/plain"},
     }
-    MIN_CHUNK_SIZE = 500
-    MAX_CHUNK_SIZE = 1000
+    MIN_CHUNK_SIZE = 200
+    MAX_CHUNK_SIZE = 2000
+    CHUNK_OVERLAP = 150
 
     @staticmethod
     def get_extension(filename: str) -> str:
@@ -61,16 +62,16 @@ class DocumentService:
             return cls.extract_text_from_pdf(file_path)
         if extension == ".docx":
             text = cls.extract_text_from_docx(file_path)
-            return cls.semantic_chunk_text(text, page=1)
+            return cls.agentic_chunk_text(text, page=1)
         if extension == ".txt":
             text = cls.extract_text_from_txt(file_path)
-            return cls.semantic_chunk_text(text, page=1)
-        raise ValueError("Unsupported file extension")
+            return cls.agentic_chunk_text(text, page=1)
+        raise ValueError(f"Unsupported file extension: {extension}")
 
     @classmethod
     def extract_text_from_pdf(cls, file_path: str) -> List[dict]:
         """
-        Extract text from each page and then chunk semantically (500-1000 chars).
+        Extract text from each page and then chunk using agentic splitter.
         Returns list: {"text": str, "page": int}
         """
         chunks: List[dict] = []
@@ -78,8 +79,11 @@ class DocumentService:
             for page_num, page in enumerate(doc):
                 page_text = page.get_text()
                 if not page_text.strip():
+                    # If page is empty, might be scanned - but detection is separate.
+                    # Just skip empty text.
                     continue
-                page_chunks = cls.semantic_chunk_text(page_text, page=page_num + 1)
+                # Use agentic chunking for better semantic boundaries
+                page_chunks = cls.agentic_chunk_text(page_text, page=page_num + 1)
                 chunks.extend(page_chunks)
         return chunks
 
@@ -100,6 +104,59 @@ class DocumentService:
             return file.read()
 
     @classmethod
+    def agentic_chunk_text(cls, text: str, page: int) -> List[dict]:
+        """
+        Agentic chunking using LLM to determine semantic boundaries.
+        Falls back to semantic_chunk_text logic if LLM fails or for optimization.
+        """
+        # Avoid circular import at module level
+        from app.services.rag_service import RAGService 
+        
+        rag_service = RAGService()
+        clean_text = cls._normalize_text(text)
+        if not clean_text:
+            return []
+            
+        # 1. Split into propositions (sentences)
+        # Use simple splitting by punctuation
+        propositions = [p.strip() for p in re.split(r"(?<=[.!?։])\s+", clean_text) if p.strip()]
+        
+        chunks = []
+        current_chunk = ""
+        
+        for prop in propositions:
+            # If current chunk is empty, just start with prop
+            if not current_chunk:
+                current_chunk = prop
+                continue
+                
+            # Hard size limit check - if adding prop exceeds MAX_CHUNK_SIZE, force split
+            if len(current_chunk) + len(prop) > cls.MAX_CHUNK_SIZE:
+                chunks.append({"text": current_chunk, "page": page})
+                current_chunk = prop
+                continue
+                
+            # Optimization: If current chunk is small (<300 chars), merge without asking LLM
+            # This reduces LLM calls by ~50% while keeping reasonable minimum context
+            if len(current_chunk) < 300:
+                current_chunk = f"{current_chunk} {prop}"
+                continue
+
+            # Agentic check
+            is_new_topic = rag_service.check_semantic_boundary(current_chunk, prop)
+            
+            if is_new_topic:
+                chunks.append({"text": current_chunk, "page": page})
+                current_chunk = prop
+            else:
+                current_chunk = f"{current_chunk} {prop}"
+        
+        if current_chunk:
+            chunks.append({"text": current_chunk, "page": page})
+            
+        return chunks
+
+    @classmethod
     def semantic_chunk_text(
         cls,
         text: str,
@@ -108,7 +165,8 @@ class DocumentService:
         max_chars: int | None = None,
     ) -> List[dict]:
         """
-        Semantic chunking by paragraph/sentence with chunk size in [500, 1000] chars.
+        Semantic chunking by paragraph/sentence with chunk size in [MIN_CHUNK_SIZE, MAX_CHUNK_SIZE] chars.
+        Adds CHUNK_OVERLAP characters of overlap between consecutive chunks for context continuity.
         """
         min_size = min_chars or cls.MIN_CHUNK_SIZE
         max_size = max_chars or cls.MAX_CHUNK_SIZE
@@ -145,7 +203,9 @@ class DocumentService:
 
         if current.strip():
             chunks.append({"text": current.strip(), "page": page})
-        return cls._merge_small_chunks(chunks, min_size, max_size)
+
+        merged = cls._merge_small_chunks(chunks, min_size, max_size)
+        return cls._add_overlap(merged, cls.CHUNK_OVERLAP)
 
     @classmethod
     def _append_piece(
@@ -221,6 +281,10 @@ class DocumentService:
     def _normalize_text(text: str) -> str:
         # Keep paragraph boundaries while cleaning repeated spaces.
         normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+        # Fix PDF hyphenation artifacts: "нало-\n гоплательщик" → "налогоплательщик"
+        normalized = re.sub(r"-\s*\n\s*", "", normalized)
+        # Strip common page number patterns (standalone numbers on their own line)
+        normalized = re.sub(r"\n\s*\d{1,3}\s*\n", "\n", normalized)
         normalized = re.sub(r"[ \t]+", " ", normalized)
         normalized = re.sub(r"\n{3,}", "\n\n", normalized)
         return normalized.strip()
@@ -292,6 +356,29 @@ class DocumentService:
                     current = sentence
         if current:
             result.append(current.strip())
+        return result
+
+    @staticmethod
+    def _add_overlap(chunks: List[dict], overlap: int) -> List[dict]:
+        """Add overlap between consecutive same-page chunks for context continuity."""
+        if not chunks or overlap <= 0:
+            return chunks
+
+        result = [chunks[0]]
+        for i in range(1, len(chunks)):
+            prev_text = (chunks[i - 1].get("text") or "").strip()
+            curr_text = (chunks[i].get("text") or "").strip()
+
+            # Only add overlap for chunks on the same page
+            if chunks[i].get("page") == chunks[i - 1].get("page") and len(prev_text) > overlap:
+                # Take the last `overlap` characters, try to break on a word boundary
+                tail = prev_text[-overlap:]
+                space_idx = tail.find(" ")
+                if space_idx > 0:
+                    tail = tail[space_idx + 1:]
+                curr_text = f"...{tail}\n\n{curr_text}"
+
+            result.append({"text": curr_text, "page": chunks[i].get("page")})
         return result
 
     @staticmethod

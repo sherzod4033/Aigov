@@ -1,6 +1,7 @@
 import os
-from typing import List, Any
-from fastapi import APIRouter, Depends, UploadFile, HTTPException
+from typing import Any, List, Optional
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi.concurrency import run_in_threadpool
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
 
@@ -173,3 +174,114 @@ async def delete_document(
     await session.delete(doc)
     await session.commit()
     return doc
+
+
+@router.post("/reindex")
+async def reindex_all_documents(
+    current_user: User = Depends(deps.get_current_active_superuser),
+    session: AsyncSession = Depends(deps.get_session),
+) -> Any:
+    """
+    Re-chunk and re-embed ALL documents using updated chunking parameters
+    and the new multilingual embedding model.
+    1. Delete all chunks from DB and ChromaDB
+    2. Re-extract and re-chunk each document
+    3. Re-index in ChromaDB with new embeddings
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # Get all documents
+    result = await session.exec(select(Document))
+    documents = result.all()
+    if not documents:
+        return {"status": "ok", "message": "No documents to reindex", "total_chunks": 0}
+
+    rag_service = RAGService()
+
+    # Delete all existing chunks from ChromaDB
+    all_chunks_result = await session.exec(select(Chunk))
+    all_chunks = all_chunks_result.all()
+    old_chunk_ids = [str(c.id) for c in all_chunks if c.id is not None]
+    if old_chunk_ids:
+        try:
+            rag_service.delete_documents(old_chunk_ids)
+        except Exception:
+            logger.warning("Could not delete old chunks from ChromaDB (may be using new collection)")
+
+    # Delete all chunks from DB
+    for chunk in all_chunks:
+        await session.delete(chunk)
+    await session.flush()
+
+    total_chunks = 0
+    errors = []
+
+    for doc in documents:
+        try:
+            if not doc.path or not os.path.exists(doc.path):
+                errors.append(f"File missing for document {doc.id}: {doc.name}")
+                doc.status = "error"
+                session.add(doc)
+                continue
+
+            ext = DocumentService.get_extension(doc.name or doc.path)
+
+            if ext == ".pdf" and DocumentService.is_scanned_pdf(doc.path):
+                from app.services.ocr_service import OCRService
+                # OCR is also blocking/heavy
+                ocr_pages = await run_in_threadpool(OCRService.extract_text_from_scanned_pdf, doc.path)
+                chunks_data = []
+                for page_data in ocr_pages:
+                    # chunking is also blocking
+                    page_chunks = await run_in_threadpool(
+                        DocumentService.semantic_chunk_text,
+                        page_data.get("text", ""),
+                        page=page_data.get("page", 1),
+                    )
+                    chunks_data.extend(page_chunks)
+            else:
+                # extract_chunks handles agentic chunking (blocking)
+                chunks_data = await run_in_threadpool(DocumentService.extract_chunks, doc.path, ext)
+
+            if not chunks_data:
+                errors.append(f"No text extracted from document {doc.id}: {doc.name}")
+                doc.status = "error"
+                session.add(doc)
+                continue
+
+            docs_text = []
+            ids = []
+            metadatas = []
+
+            for i, chunk_data in enumerate(chunks_data):
+                chunk = Chunk(
+                    text=chunk_data["text"],
+                    page=chunk_data["page"],
+                    doc_id=doc.id,
+                )
+                session.add(chunk)
+                await session.flush()
+
+                docs_text.append(chunk.text)
+                ids.append(str(chunk.id))
+                metadatas.append({"doc_id": doc.id, "doc_name": doc.name, "page": chunk.page})
+
+            rag_service.add_documents(docs_text, metadatas, ids)
+            doc.status = "indexed"
+            session.add(doc)
+            total_chunks += len(chunks_data)
+            logger.info(f"Reindexed doc {doc.id} ({doc.name}): {len(chunks_data)} chunks")
+
+        except Exception as exc:
+            errors.append(f"Error reindexing doc {doc.id} ({doc.name}): {str(exc)}")
+            doc.status = "error"
+            session.add(doc)
+
+    await session.commit()
+    return {
+        "status": "ok" if not errors else "partial",
+        "total_documents": len(documents),
+        "total_chunks": total_chunks,
+        "errors": errors,
+    }

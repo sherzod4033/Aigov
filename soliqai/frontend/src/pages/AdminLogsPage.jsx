@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { logsService } from '../services/services';
 import {
     Download,
@@ -47,7 +48,10 @@ const AdminLogsPage = () => {
     const [isExporting, setIsExporting] = useState(false);
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
-    const [query, setQuery] = useState('');
+
+    // Поиск читаем из URL param ?q= (устанавливается хедером)
+    const [searchParams] = useSearchParams();
+    const query = searchParams.get('q') || '';
 
     const fetchData = useCallback(async (filters = {}) => {
         const from = filters.startDate ?? '';
@@ -124,17 +128,13 @@ const AdminLogsPage = () => {
     return (
         <div className="space-y-6 px-4">
             <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                    <h2 className="text-3xl font-extrabold text-[#1f3a60]">Логи и Аналитика</h2>
-
-                </div>
-
                 <div className="flex flex-wrap items-center gap-3">
                     <Input
                         value={query}
-                        onChange={(event) => setQuery(event.target.value)}
-                        placeholder="Поиск по вопросу или ID запроса..."
-                        className="min-w-[220px] flex-1"
+                        readOnly
+                        placeholder="Поиск через строку выше..."
+                        className="min-w-[220px] flex-1 bg-slate-50 cursor-default"
+                        title="Используйте поиск в верхней панели"
                     />
 
                     <Input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} className="w-40" />

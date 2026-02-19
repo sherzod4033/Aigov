@@ -1,5 +1,5 @@
-import React from 'react';
-import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Link, Outlet, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
     Bell,
     ChartNoAxesCombined,
@@ -8,7 +8,6 @@ import {
     MessageSquare,
     Search,
     Settings,
-    ShieldCheck,
     UserCircle2,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
@@ -39,9 +38,61 @@ const resolvePageMeta = (pathname) => {
 
 const isActiveLink = (pathname, href) => pathname === href || (href !== '/' && pathname.startsWith(`${href}/`));
 
+/** Декодирует payload JWT токена без внешних библиотек */
+const decodeJwtPayload = (token) => {
+    try {
+        const parts = token.split('.');
+        if (parts.length !== 3) return null;
+        const payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+        const decoded = JSON.parse(atob(payload));
+        return decoded;
+    } catch {
+        return null;
+    }
+};
+
 const Layout = () => {
     const location = useLocation();
     const navigate = useNavigate();
+    const [searchParams, setSearchParams] = useSearchParams();
+
+    // --- User Info из JWT ---
+    const userInfo = useMemo(() => {
+        const token = localStorage.getItem('token');
+        if (!token) return { username: 'Пользователь', email: '' };
+        const payload = decodeJwtPayload(token);
+        const username = payload?.sub || 'Пользователь';
+        return {
+            username,
+            email: `${username}@soliq.tj`,
+        };
+    }, []);
+
+    // --- Язык: читаем из localStorage, по умолчанию TJ ---
+    const [activeLang, setActiveLang] = useState(() => localStorage.getItem('lang') || 'TJ');
+
+    const handleLangSwitch = (lang) => {
+        setActiveLang(lang);
+        localStorage.setItem('lang', lang);
+    };
+
+    // --- Поиск через URL searchParams ---
+    const searchValue = searchParams.get('q') || '';
+
+    const handleSearchChange = (e) => {
+        const val = e.target.value;
+        if (val) {
+            setSearchParams({ q: val });
+        } else {
+            setSearchParams({});
+        }
+    };
+
+    // Сбрасываем поиск при смене страницы
+    useEffect(() => {
+        setSearchParams({});
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [location.pathname]);
 
     const pageMeta = resolvePageMeta(location.pathname);
 
@@ -89,8 +140,8 @@ const Layout = () => {
                     <div className="mb-3 flex items-center gap-3 rounded-xl bg-white/5 p-2.5">
                         <UserCircle2 className="h-9 w-9 text-slate-300" />
                         <div className="min-w-0">
-                            <p className="truncate text-sm font-semibold text-white">Admin User</p>
-                            <p className="truncate text-xs text-slate-300">admin@soliq.tj</p>
+                            <p className="truncate text-sm font-semibold text-white">{userInfo.username}</p>
+                            <p className="truncate text-xs text-slate-300">{userInfo.email}</p>
                         </div>
                     </div>
                     <button
@@ -120,15 +171,32 @@ const Layout = () => {
                         </div>
 
                         <div className="flex w-full items-center gap-3 sm:w-auto">
+                            {/* Переключатель языка */}
                             <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 mr-2">
-                                <button type="button" className="rounded-md bg-white px-2 py-0.5 text-[10px] font-bold text-[#1f3a60] shadow-sm">TJ</button>
-                                <button type="button" className="rounded-md px-2 py-0.5 text-[10px] font-bold text-slate-500">RU</button>
+                                {['TJ', 'RU'].map((lang) => (
+                                    <button
+                                        key={lang}
+                                        type="button"
+                                        onClick={() => handleLangSwitch(lang)}
+                                        className={cn(
+                                            'rounded-md px-2 py-0.5 text-[10px] font-bold transition',
+                                            activeLang === lang
+                                                ? 'bg-white text-[#1f3a60] shadow-sm'
+                                                : 'text-slate-500 hover:text-slate-700',
+                                        )}
+                                    >
+                                        {lang}
+                                    </button>
+                                ))}
                             </div>
 
+                            {/* Поиск */}
                             <div className="relative flex-1 sm:w-64 sm:flex-none">
                                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                                 <input
                                     type="text"
+                                    value={searchValue}
+                                    onChange={handleSearchChange}
                                     placeholder={pageMeta.searchPlaceholder}
                                     className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#1f3a60]/30"
                                 />
@@ -139,7 +207,11 @@ const Layout = () => {
                                 Система работает
                             </div>
 
-                            <button type="button" className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50 hover:text-[#1f3a60]">
+                            <button
+                                type="button"
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50 hover:text-[#1f3a60]"
+                                title="Уведомления"
+                            >
                                 <Bell className="h-4 w-4" />
                             </button>
 
@@ -172,7 +244,7 @@ const Layout = () => {
                     </div>
                 </header>
 
-                <main className="soft-grid flex-1 overflow-auto">
+                <main className="soft-grid flex-1 overflow-auto p-6">
                     <Outlet />
                 </main>
             </div>

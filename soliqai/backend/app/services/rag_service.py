@@ -1,10 +1,19 @@
 import chromadb
+from chromadb.utils import embedding_functions
 from app.core.config import settings
 import ollama
 from openai import AsyncOpenAI
 from pathlib import Path
 from typing import List, Dict
 import re
+
+
+# Multilingual embedding model — supports 50+ languages including Russian and Tajik.
+MULTILINGUAL_EMBEDDING_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"
+
+# Maximum cosine distance for a chunk to be considered relevant.
+# Calibrated for the multilingual model (lower = stricter).
+RELEVANCE_DISTANCE_THRESHOLD = 1.2
 
 
 RU_TJ_STOPWORDS = {
@@ -49,9 +58,18 @@ class RAGService:
             else None
         )
 
+    @staticmethod
+    def _get_embedding_function():
+        """Return a multilingual sentence-transformer embedding function for ChromaDB."""
+        return embedding_functions.SentenceTransformerEmbeddingFunction(
+            model_name=MULTILINGUAL_EMBEDDING_MODEL,
+        )
+
     def _init_chroma(self) -> None:
         if self.collection is not None or self.chroma_error is not None:
             return
+
+        ef = self._get_embedding_function()
 
         attempts = []
         attempts.append(
@@ -80,7 +98,10 @@ class RAGService:
         for create_client in attempts:
             try:
                 client = create_client()
-                collection = client.get_or_create_collection(name="soliqai_docs")
+                collection = client.get_or_create_collection(
+                    name="soliqai_docs_multilingual",
+                    embedding_function=ef,
+                )
                 self.chroma_client = client
                 self.collection = collection
                 self.chroma_error = None
@@ -280,6 +301,40 @@ class RAGService:
         except Exception as e:
             print(f"Query Condensation Error: {e}")
             return query
+
+    def check_semantic_boundary(self, current_chunk: str, next_proposition: str, model: str = "gemma3n:e4b") -> bool:
+        """
+        Agentic decision: Should we split here?
+        Returns True if a split is recommended (new topic), False if they should be merged.
+        """
+        # Heuristic: If implicit split by size is acceptable, we can skip LLM for very short props, 
+        # but for accuracy we'll ask.
+        # To save time, if current chunk is very small (<500 chars), just merge.
+        if len(current_chunk) < 500:
+            return False
+
+        prompt = (
+            "Analyze the semantic relationship between the Context and the Next Sentence.\n"
+            "Context: \"...{context_snippet}\"\n"
+            "Next Sentence: \"{next_proposition}\"\n\n"
+            "Question: Does the Next Sentence start a completely new, unrelated topic compared to the Context? "
+            "Answer ONLY with 'YES' (split) or 'NO' (merge)."
+        )
+
+        try:
+            # Use a fast local model with low temperature
+            response = ollama.chat(model=model, messages=[
+                {'role': 'user', 'content': prompt.format(
+                    context_snippet=current_chunk[-300:], 
+                    next_proposition=next_proposition
+                )},
+            ], options={'temperature': 0})
+            
+            answer = response['message']['content'].strip().upper()
+            return "YES" in answer
+        except Exception as e:
+            print(f"Agentic Boundary Check Error: {e}")
+            return False # Fallback: merge by default if error
 
     @staticmethod
     def _detect_article_reference(query: str) -> str | None:
