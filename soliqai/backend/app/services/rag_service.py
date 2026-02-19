@@ -302,39 +302,7 @@ class RAGService:
             print(f"Query Condensation Error: {e}")
             return query
 
-    def check_semantic_boundary(self, current_chunk: str, next_proposition: str, model: str = "gemma3n:e4b") -> bool:
-        """
-        Agentic decision: Should we split here?
-        Returns True if a split is recommended (new topic), False if they should be merged.
-        """
-        # Heuristic: If implicit split by size is acceptable, we can skip LLM for very short props, 
-        # but for accuracy we'll ask.
-        # To save time, if current chunk is very small (<500 chars), just merge.
-        if len(current_chunk) < 500:
-            return False
-
-        prompt = (
-            "Analyze the semantic relationship between the Context and the Next Sentence.\n"
-            "Context: \"...{context_snippet}\"\n"
-            "Next Sentence: \"{next_proposition}\"\n\n"
-            "Question: Does the Next Sentence start a completely new, unrelated topic compared to the Context? "
-            "Answer ONLY with 'YES' (split) or 'NO' (merge)."
-        )
-
-        try:
-            # Use a fast local model with low temperature
-            response = ollama.chat(model=model, messages=[
-                {'role': 'user', 'content': prompt.format(
-                    context_snippet=current_chunk[-300:], 
-                    next_proposition=next_proposition
-                )},
-            ], options={'temperature': 0})
-            
-            answer = response['message']['content'].strip().upper()
-            return "YES" in answer
-        except Exception as e:
-            print(f"Agentic Boundary Check Error: {e}")
-            return False # Fallback: merge by default if error
+    # check_semantic_boundary removed — replaced by deterministic HybridChunker.
 
     @staticmethod
     def _detect_article_reference(query: str) -> str | None:

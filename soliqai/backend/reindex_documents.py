@@ -1,3 +1,9 @@
+"""
+Reindex all documents using the new HybridChunker pipeline.
+
+Usage: python reindex_documents.py
+"""
+
 import asyncio
 import os
 import sys
@@ -11,117 +17,108 @@ sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 from app.core.database import engine
 from app.models.models import Document, Chunk
 from app.services.document_service import DocumentService
-from app.services.ocr_service import OCRService
+from app.services.hybrid_chunker import HybridChunker
 from app.services.rag_service import RAGService
 
+
 async def reindex_all_documents():
-    print("Starting re-indexing process...")
-    
-    # Create a session manually
+    print("Starting re-indexing with HybridChunker pipeline...")
+
     async_session = sessionmaker(
         engine, class_=AsyncSession, expire_on_commit=False
     )
-    
+
     rag_service = RAGService()
-    
+    chunker = HybridChunker()
+
     async with async_session() as session:
-        # Fetch all documents
         result = await session.exec(select(Document))
         documents = result.all()
-        
+
         print(f"Found {len(documents)} documents to re-index.")
-        
+
         for doc in documents:
             print(f"\nProcessing Document ID: {doc.id} ({doc.name})...")
-            
+
             file_path = doc.path
             if not file_path or not os.path.exists(file_path):
                 print(f"  WARNING: File not found at {file_path}. Skipping.")
                 continue
-                
-            # 1. Get existing chunks to delete
-            chunks_result = await session.exec(select(Chunk).where(Chunk.doc_id == doc.id))
+
+            # 1. Delete existing chunks
+            chunks_result = await session.exec(
+                select(Chunk).where(Chunk.doc_id == doc.id)
+            )
             existing_chunks = chunks_result.all()
             existing_chunk_ids = [str(c.id) for c in existing_chunks if c.id is not None]
-            
-            print(f"  Deleting {len(existing_chunks)} existing chunks from DB and Chroma...")
-            
-            # Delete from Chroma
+
+            print(f"  Deleting {len(existing_chunks)} existing chunks...")
+
             try:
                 rag_service.delete_documents(existing_chunk_ids)
             except Exception as e:
                 print(f"  Error deleting from Chroma: {e}")
-            
-            # Delete from Postgres
+
             for chunk in existing_chunks:
                 await session.delete(chunk)
             await session.commit()
-            
-            # 2. Extract new chunks
-            print("  Extracting new chunks...")
+
+            # 2. Extract & chunk with new pipeline
+            print("  Extracting blocks & chunking...")
             file_ext = DocumentService.get_extension(doc.name)
-            
+
             try:
-                if file_ext == ".pdf" and DocumentService.is_scanned_pdf(file_path):
-                    ocr_pages = OCRService.extract_text_from_scanned_pdf(file_path)
-                    chunks_data = []
-                    for page_data in ocr_pages:
-                        chunks_data.extend(
-                            DocumentService.semantic_chunk_text(
-                                page_data.get("text", ""),
-                                page=page_data.get("page", 1),
-                            )
-                        )
-                else:
-                    chunks_data = DocumentService.extract_chunks(file_path, file_ext)
+                chunk_results = DocumentService.extract_and_chunk(
+                    file_path, file_ext, chunker
+                )
             except Exception as e:
                 print(f"  Error extracting text: {e}")
                 continue
 
-            if not chunks_data:
+            if not chunk_results:
                 print("  WARNING: No chunks extracted.")
                 continue
 
-            print(f"  Generated {len(chunks_data)} new chunks.")
-            
-            # 3. Save new chunks to Postgres
-            new_chunks_objs = []
+            print(f"  Generated {len(chunk_results)} new chunks.")
+
+            # 3. Save to DB & index in Chroma
             docs_text = []
             ids = []
             metadatas = []
-            
-            for chunk_data in chunks_data:
+
+            for cr in chunk_results:
                 chunk = Chunk(
-                    text=chunk_data["text"],
-                    page=chunk_data["page"],
-                    doc_id=doc.id
+                    text=cr.text,
+                    page=cr.page_start,
+                    chunk_index=cr.chunk_index,
+                    section=cr.section_path_json if cr.section_path else None,
+                    doc_id=doc.id,
                 )
                 session.add(chunk)
-                await session.flush() # Populate ID
+                await session.flush()
                 await session.refresh(chunk)
-                
-                new_chunks_objs.append(chunk)
-                
+
                 docs_text.append(chunk.text)
                 ids.append(str(chunk.id))
                 metadatas.append({
-                    "doc_id": doc.id, 
-                    "doc_name": doc.name, 
-                    "page": chunk.page
+                    "doc_id": doc.id,
+                    "doc_name": doc.name,
+                    "page": chunk.page,
+                    "chunk_index": cr.chunk_index,
                 })
-            
+
             await session.commit()
-            
-            # 4. Index in Chroma
+
             print(f"  Indexing {len(ids)} chunks in ChromaDB...")
             try:
                 rag_service.add_documents(docs_text, metadatas, ids)
             except Exception as e:
                 print(f"  Error indexing in Chroma: {e}")
-            
+
             print("  Done.")
 
     print("\nRe-indexing complete.")
+
 
 if __name__ == "__main__":
     try:

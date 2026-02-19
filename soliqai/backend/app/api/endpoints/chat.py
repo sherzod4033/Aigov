@@ -11,7 +11,7 @@ from sqlmodel import select
 
 from app.api import deps
 from app.core.rate_limit import chat_limiter, check_rate_limit
-from app.models.models import User, Log, Document
+from app.models.models import User, Log, Document, Chunk
 from app.services.rag_service import RAGService, RELEVANCE_DISTANCE_THRESHOLD
 from app.services.runtime_settings_service import RuntimeSettingsService
 
@@ -59,6 +59,60 @@ def _is_no_data_answer(answer: str) -> bool:
         "ответ не найден в базе" in normalized
         or "маълумот дар база мавҷуд нест" in normalized
     )
+
+
+async def _expand_with_neighbors(
+    selected_chunks: list[dict[str, Any]],
+    session: AsyncSession,
+) -> list[str]:
+    """
+    Neighbor expansion: for each selected chunk, fetch its adjacent chunks
+    (chunk_index - 1 and chunk_index + 1) from the DB and add their text
+    to the context. This provides seamless coverage across chunk boundaries
+    without duplicating text in the embedding store.
+    """
+    if not selected_chunks:
+        return []
+
+    # Collect (doc_id, chunk_index) pairs for neighbor lookup
+    seen_ids = {item["chunk_id"] for item in selected_chunks}
+    neighbor_queries: list[tuple[int, int]] = []
+
+    for item in selected_chunks:
+        meta = item.get("metadata", {})
+        doc_id = meta.get("doc_id")
+        chunk_idx = meta.get("chunk_index")
+        if doc_id is None or chunk_idx is None:
+            continue
+        for offset in (-1, 1):
+            neighbor_queries.append((doc_id, chunk_idx + offset))
+
+    # Fetch neighbors from DB in one query
+    neighbor_texts: dict[str, str] = {}  # chunk_id -> text
+    if neighbor_queries:
+        from sqlalchemy import or_, and_
+        conditions = [
+            and_(Chunk.doc_id == did, Chunk.chunk_index == cidx)
+            for did, cidx in neighbor_queries
+        ]
+        result = await session.exec(
+            select(Chunk).where(or_(*conditions))
+        )
+        for chunk in result.all():
+            cid = str(chunk.id)
+            if cid not in seen_ids:
+                neighbor_texts[cid] = chunk.text
+
+    # Build expanded context: for each selected chunk, prepend/append neighbors
+    expanded: list[str] = []
+    for item in selected_chunks:
+        expanded.append(item["text"])
+
+    # Add unique neighbor texts at the end
+    for text in neighbor_texts.values():
+        expanded.append(text)
+
+    return expanded
 
 def _is_greeting(text: str) -> bool:
     lowered = text.lower()
@@ -291,7 +345,10 @@ async def chat(
             doc_name_map[doc.id] = doc.name
 
     sources: List[SourceItem] = []
-    filtered_context: List[str] = []
+    # Neighbor expansion: fetch adjacent chunks from DB for richer context
+    expanded_context = await _expand_with_neighbors(selected_chunks, session)
+
+    filtered_context: List[str] = list(expanded_context)
     for item in selected_chunks:
         chunk_text = item["text"]
         meta = item["metadata"]
@@ -302,7 +359,9 @@ async def chat(
         quote = (chunk_text or "").strip().replace("\n", " ")
         if len(quote) > 240:
             quote = quote[:240].rstrip() + "..."
-        filtered_context.append(chunk_text)
+        # chunk_text already in filtered_context via neighbor expansion
+        if chunk_text not in filtered_context:
+            filtered_context.append(chunk_text)
         sources.append(
             SourceItem(
                 source_type="document",

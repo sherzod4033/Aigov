@@ -1,3 +1,4 @@
+import json
 import os
 from typing import Any, List, Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
@@ -8,10 +9,11 @@ from sqlmodel import select
 from app.api import deps
 from app.models.models import User, Document, Chunk
 from app.services.document_service import DocumentService
-from app.services.ocr_service import OCRService
+from app.services.hybrid_chunker import HybridChunker
 from app.services.rag_service import RAGService
 
 router = APIRouter()
+
 
 @router.post("/upload", response_model=Document)
 async def upload_document(
@@ -22,8 +24,8 @@ async def upload_document(
     """
     Upload a document (PDF/DOCX/TXT).
     1. Save file locally
-    2. Extract text (OCR if needed)
-    3. Index in ChromaDB
+    2. Extract blocks & chunk (unified pipeline)
+    3. Index in ChromaDB (batch)
     4. Save metadata in DB
     """
     try:
@@ -34,26 +36,18 @@ async def upload_document(
     # 1. Save file
     file_path = await DocumentService.save_upload_file(file)
 
-    # 2. Extract text
-    if file_ext == ".pdf" and DocumentService.is_scanned_pdf(file_path):
-        ocr_pages = OCRService.extract_text_from_scanned_pdf(file_path)
-        chunks_data = []
-        for page_data in ocr_pages:
-            chunks_data.extend(
-                DocumentService.semantic_chunk_text(
-                    page_data.get("text", ""),
-                    page=page_data.get("page", 1),
-                )
-            )
-    else:
-        chunks_data = DocumentService.extract_chunks(file_path, file_ext)
+    # 2. Extract blocks & chunk (blocking I/O → threadpool)
+    chunker = HybridChunker()
+    chunk_results = await run_in_threadpool(
+        DocumentService.extract_and_chunk, file_path, file_ext, chunker
+    )
 
-    if not chunks_data:
+    if not chunk_results:
         if os.path.exists(file_path):
             os.remove(file_path)
         raise HTTPException(status_code=400, detail="Could not extract text from file")
 
-    sample_text = " ".join(chunk.get("text", "") for chunk in chunks_data[:5])
+    sample_text = " ".join(cr.text for cr in chunk_results[:5])
     detected_language = DocumentService.detect_language(sample_text)
 
     # 3. Save Document Metadata
@@ -69,28 +63,35 @@ async def upload_document(
     await session.commit()
     await session.refresh(doc)
 
-    # 4. Save Chunks & Index in ChromaDB
+    # 4. Save Chunks & Index in ChromaDB (batch)
     rag_service = RAGService()
     docs_text = []
     ids = []
     metadatas = []
 
-    for i, chunk_data in enumerate(chunks_data):
+    for cr in chunk_results:
         chunk = Chunk(
-            text=chunk_data["text"],
-            page=chunk_data["page"],
-            doc_id=doc.id
+            text=cr.text,
+            page=cr.page_start,
+            chunk_index=cr.chunk_index,
+            section=cr.section_path_json if cr.section_path else None,
+            doc_id=doc.id,
         )
         session.add(chunk)
-        await session.flush() # get ID
-        
+        await session.flush()  # get ID
+
         docs_text.append(chunk.text)
         ids.append(str(chunk.id))
-        metadatas.append({"doc_id": doc.id, "doc_name": doc.name, "page": chunk.page})
+        metadatas.append({
+            "doc_id": doc.id,
+            "doc_name": doc.name,
+            "page": chunk.page,
+            "chunk_index": cr.chunk_index,
+        })
 
     await session.commit()
-    
-    # Index in Chroma
+
+    # Index in Chroma (batch)
     try:
         rag_service.add_documents(docs_text, metadatas, ids)
     except Exception as exc:
@@ -104,6 +105,7 @@ async def upload_document(
 
     return doc
 
+
 @router.get("/", response_model=List[Document])
 async def read_documents(
     skip: int = 0,
@@ -111,11 +113,10 @@ async def read_documents(
     session: AsyncSession = Depends(deps.get_session),
     current_user: User = Depends(deps.get_current_active_superuser),
 ) -> Any:
-    """
-    Retrieve documents.
-    """
+    """Retrieve documents."""
     result = await session.exec(select(Document).offset(skip).limit(limit))
     return result.all()
+
 
 @router.get("/{id}/chunks", response_model=List[Chunk])
 async def get_document_chunks(
@@ -123,14 +124,14 @@ async def get_document_chunks(
     session: AsyncSession = Depends(deps.get_session),
     current_user: User = Depends(deps.get_current_active_superuser),
 ) -> Any:
-    """
-    Get all chunks for a specific document.
-    """
+    """Get all chunks for a specific document."""
     doc = await session.get(Document, id)
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    result = await session.exec(select(Chunk).where(Chunk.doc_id == id).order_by(Chunk.page))
+    result = await session.exec(
+        select(Chunk).where(Chunk.doc_id == id).order_by(Chunk.chunk_index)
+    )
     return result.all()
 
 
@@ -140,9 +141,7 @@ async def delete_document(
     session: AsyncSession = Depends(deps.get_session),
     current_user: User = Depends(deps.get_current_active_superuser),
 ) -> Any:
-    """
-    Delete a document.
-    """
+    """Delete a document."""
     doc = await session.get(Document, id)
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -182,8 +181,7 @@ async def reindex_all_documents(
     session: AsyncSession = Depends(deps.get_session),
 ) -> Any:
     """
-    Re-chunk and re-embed ALL documents using updated chunking parameters
-    and the new multilingual embedding model.
+    Re-chunk and re-embed ALL documents using the new HybridChunker pipeline.
     1. Delete all chunks from DB and ChromaDB
     2. Re-extract and re-chunk each document
     3. Re-index in ChromaDB with new embeddings
@@ -191,13 +189,13 @@ async def reindex_all_documents(
     import logging
     logger = logging.getLogger(__name__)
 
-    # Get all documents
     result = await session.exec(select(Document))
     documents = result.all()
     if not documents:
         return {"status": "ok", "message": "No documents to reindex", "total_chunks": 0}
 
     rag_service = RAGService()
+    chunker = HybridChunker()
 
     # Delete all existing chunks from ChromaDB
     all_chunks_result = await session.exec(select(Chunk))
@@ -207,7 +205,7 @@ async def reindex_all_documents(
         try:
             rag_service.delete_documents(old_chunk_ids)
         except Exception:
-            logger.warning("Could not delete old chunks from ChromaDB (may be using new collection)")
+            logger.warning("Could not delete old chunks from ChromaDB")
 
     # Delete all chunks from DB
     for chunk in all_chunks:
@@ -227,24 +225,12 @@ async def reindex_all_documents(
 
             ext = DocumentService.get_extension(doc.name or doc.path)
 
-            if ext == ".pdf" and DocumentService.is_scanned_pdf(doc.path):
-                from app.services.ocr_service import OCRService
-                # OCR is also blocking/heavy
-                ocr_pages = await run_in_threadpool(OCRService.extract_text_from_scanned_pdf, doc.path)
-                chunks_data = []
-                for page_data in ocr_pages:
-                    # chunking is also blocking
-                    page_chunks = await run_in_threadpool(
-                        DocumentService.semantic_chunk_text,
-                        page_data.get("text", ""),
-                        page=page_data.get("page", 1),
-                    )
-                    chunks_data.extend(page_chunks)
-            else:
-                # extract_chunks handles agentic chunking (blocking)
-                chunks_data = await run_in_threadpool(DocumentService.extract_chunks, doc.path, ext)
+            # Unified pipeline: extract blocks → chunk
+            chunk_results = await run_in_threadpool(
+                DocumentService.extract_and_chunk, doc.path, ext, chunker
+            )
 
-            if not chunks_data:
+            if not chunk_results:
                 errors.append(f"No text extracted from document {doc.id}: {doc.name}")
                 doc.status = "error"
                 session.add(doc)
@@ -254,10 +240,12 @@ async def reindex_all_documents(
             ids = []
             metadatas = []
 
-            for i, chunk_data in enumerate(chunks_data):
+            for cr in chunk_results:
                 chunk = Chunk(
-                    text=chunk_data["text"],
-                    page=chunk_data["page"],
+                    text=cr.text,
+                    page=cr.page_start,
+                    chunk_index=cr.chunk_index,
+                    section=cr.section_path_json if cr.section_path else None,
                     doc_id=doc.id,
                 )
                 session.add(chunk)
@@ -265,13 +253,19 @@ async def reindex_all_documents(
 
                 docs_text.append(chunk.text)
                 ids.append(str(chunk.id))
-                metadatas.append({"doc_id": doc.id, "doc_name": doc.name, "page": chunk.page})
+                metadatas.append({
+                    "doc_id": doc.id,
+                    "doc_name": doc.name,
+                    "page": chunk.page,
+                    "chunk_index": cr.chunk_index,
+                })
 
+            # Batch index in Chroma
             rag_service.add_documents(docs_text, metadatas, ids)
             doc.status = "indexed"
             session.add(doc)
-            total_chunks += len(chunks_data)
-            logger.info(f"Reindexed doc {doc.id} ({doc.name}): {len(chunks_data)} chunks")
+            total_chunks += len(chunk_results)
+            logger.info(f"Reindexed doc {doc.id} ({doc.name}): {len(chunk_results)} chunks")
 
         except Exception as exc:
             errors.append(f"Error reindexing doc {doc.id} ({doc.name}): {str(exc)}")

@@ -25,6 +25,7 @@ class Document(DocumentBase, table=True):
 class ChunkBase(SQLModel):
     text: str
     page: int
+    chunk_index: Optional[int] = None  # Sequential index within document (for neighbor expansion)
     section: Optional[str] = None
     embedding_id: Optional[str] = None # ChromaDB ID
 
