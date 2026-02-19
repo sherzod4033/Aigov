@@ -340,34 +340,91 @@ class RAGService:
     def _detect_article_reference(query: str) -> str | None:
         """
         Detects if the query is asking for a specific article number.
-        Returns the likely string format in the document (e.g., "СТАТЬЯ 80").
+        Returns a lowercase search string for case-insensitive matching
+        (e.g., "статья 80", "моддаи 2").
         """
         q = query.lower()
-        
-        # Russian: "статья 80", "ст. 80", "80 статья", "80 статье", "статью 80", "статьей 80"
-        # Match "word number"
-        # [яеийю] covers статья, статье, статьи, статью. 
-        # For 'статьей' we can use 'стать(?:ей|[яеийю])' or simply `стать[а-я]+` but let's be specific.
-        # Let's use `стать[яеийю]+` to catch endings.
-        match_ru_prefix = re.search(r"\b(?:стать[яеийю]+|ст\.?)\s*(\d+)", q)
+
+        # Russian: "статья 80", "ст. 80", "80 статья", "80-ю статью", "статьей 80"
+        match_ru_prefix = re.search(r"(?:стать[а-яё]*|ст\.?)\s*(\d+)", q)
         if match_ru_prefix:
-            return f"СТАТЬЯ {match_ru_prefix.group(1)}"
-            
-        # Match "number word"
-        match_ru_suffix = re.search(r"\b(\d+)\s*(?:стать[яеийю]+|ст\.?)", q)
+            return f"статья {match_ru_prefix.group(1)}"
+
+        match_ru_suffix = re.search(r"(\d+)\s*-?\s*(?:стать[а-яё]*|ст\.?)", q)
         if match_ru_suffix:
-            return f"СТАТЬЯ {match_ru_suffix.group(1)}"
-            
-        # Tajik: "моддаи 80", "80 мақола"
-        match_tj_prefix = re.search(r"\b(?:моддаи?|мод\.?)\s*(\d+)", q)
+            return f"статья {match_ru_suffix.group(1)}"
+
+        # Tajik: "моддаи 2", "моддаи 2.", "мод. 5", "дар моддаи 2"
+        match_tj_prefix = re.search(r"(?:моддаи?|мод\.?)\s*(\d+)", q)
         if match_tj_prefix:
-            return f"МОДДАИ {match_tj_prefix.group(1)}"
-            
-        match_tj_suffix = re.search(r"\b(\d+)\s*(?:мақола|моддаи?)", q)
+            return f"моддаи {match_tj_prefix.group(1)}"
+
+        match_tj_suffix = re.search(r"(\d+)\s*(?:мақола|моддаи?)", q)
         if match_tj_suffix:
-            return f"МОДДАИ {match_tj_suffix.group(1)}"
-            
+            return f"моддаи {match_tj_suffix.group(1)}"
+
         return None
+
+    @staticmethod
+    def _boost_article_chunks(results: Dict, article_ref: str) -> Dict:
+        """
+        Post-retrieval re-ranking: boost chunks whose text contains the requested
+        article reference (case-insensitive). Matching chunks are moved to the front
+        with their original distance halved so they rank higher.
+        """
+        if not results.get("documents") or not results["documents"][0]:
+            return results
+
+        docs = results["documents"][0]
+        ids = results["ids"][0]
+        metas = results["metadatas"][0]
+        dists = results["distances"][0]
+
+        ref_lower = article_ref.lower()
+        # Also build a pattern like "Моддаи 2" (title-case) variations
+        # to catch exact headers in the text.
+        article_number = re.search(r"\d+", article_ref)
+        number_str = article_number.group(0) if article_number else ""
+
+        # Match patterns: "Моддаи 2", "Статья 2", "моддаи 2" etc.
+        # We look for the keyword + number in the chunk text.
+        boosted = []
+        normal = []
+
+        for i, doc_text in enumerate(docs):
+            text_lower = (doc_text or "").lower()
+            # Check if the chunk contains the article reference
+            contains_ref = ref_lower in text_lower
+            # Also check with flexible whitespace: "моддаи  2" or "статья\n2"
+            if not contains_ref and number_str:
+                keyword = ref_lower.replace(number_str, "").strip()
+                pattern = re.escape(keyword) + r"\s+" + re.escape(number_str) + r"\b"
+                contains_ref = bool(re.search(pattern, text_lower))
+
+            entry = (docs[i], ids[i], metas[i], dists[i])
+            if contains_ref:
+                boosted.append(entry)
+            else:
+                normal.append(entry)
+
+        # Reorder: boosted first, then normal
+        reordered = boosted + normal
+        if not reordered:
+            return results
+
+        results["documents"] = [[e[0] for e in reordered]]
+        results["ids"] = [[e[1] for e in reordered]]
+        results["metadatas"] = [[e[2] for e in reordered]]
+        # Halve distance for boosted chunks so they pass relevance filter more easily
+        new_dists = []
+        for i, entry in enumerate(reordered):
+            if i < len(boosted):
+                new_dists.append(entry[3] * 0.5)
+            else:
+                new_dists.append(entry[3])
+        results["distances"] = [new_dists]
+
+        return results
 
     def query_documents(self, query_text: str, n_results: int = 5) -> Dict:
         self._init_chroma()
@@ -378,19 +435,21 @@ class RAGService:
                 "metadatas": [[]],
                 "distances": [[]],
             }
-        
-        where_doc = None
-        article_ref = self._detect_article_reference(query_text)
-        if article_ref:
-            # If specific article is requested, filter chunks to contain that string.
-            # This is a heuristic to fix embedding retrieval issues for specific short articles.
-            where_doc = {"$contains": article_ref}
 
-        return self.collection.query(
+        article_ref = self._detect_article_reference(query_text)
+        # When an article is referenced, fetch more chunks to increase recall,
+        # then boost matching ones to the top.
+        effective_n = max(n_results, 15) if article_ref else n_results
+
+        results = self.collection.query(
             query_texts=[query_text],
-            n_results=n_results,
-            where_document=where_doc
+            n_results=effective_n,
         )
+
+        if article_ref:
+            results = self._boost_article_chunks(results, article_ref)
+
+        return results
 
     async def generate_answer(
         self, 

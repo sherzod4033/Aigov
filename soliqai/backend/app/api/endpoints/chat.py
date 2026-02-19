@@ -198,8 +198,15 @@ async def chat(
         chat_history.append({"role": "assistant", "content": log.answer})
 
     # 1. Condense Query for Search
-    search_query = await rag_service.condense_query(normalized_question, chat_history, model=model)
-    logger.debug(f"Condensed Search Query: {search_query}")
+    # Skip condensation for article-reference queries to prevent the LLM
+    # from rewriting away the article number (e.g. "Моддаи 2" → "содержание закона").
+    article_ref = rag_service._detect_article_reference(normalized_question)
+    if article_ref:
+        search_query = normalized_question
+        logger.debug(f"Article reference detected ({article_ref}), skipping condensation")
+    else:
+        search_query = await rag_service.condense_query(normalized_question, chat_history, model=model)
+        logger.debug(f"Condensed Search Query: {search_query}")
 
     # 2. Search
     logger.debug(f"Querying ChromaDB with: {search_query}, top_k={top_k}")

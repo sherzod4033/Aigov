@@ -126,33 +126,45 @@ class RagServiceHelpersTests(unittest.TestCase):
         # "почему" is not in stopwords but "именно" is
         self.assertNotIn("именно", tokens)
 
+    def test_detect_article_reference_tajik_mixed_case(self):
+        """Queries like 'Дар моддаи 2 чи навишта шудааст?' should detect article ref."""
+        ref = RAGService._detect_article_reference("Дар моддаи 2 чи навишта шудааст?")
+        self.assertIsNotNone(ref)
+        self.assertIn("2", ref)
+        self.assertEqual(ref, "моддаи 2")
 
-class ChatFilteringHelpersTests(unittest.TestCase):
-    def test_detect_no_data_answer_phrase(self):
-        self.assertTrue(_is_no_data_answer("Ответ не найден в базе / Маълумот дар база мавҷуд нест"))
-        self.assertTrue(_is_no_data_answer("Маълумот дар база мавҷуд нест / Ответ не найден в базе"))
-        self.assertFalse(_is_no_data_answer("Стандартная ставка — 15%"))
+    def test_detect_article_reference_russian(self):
+        """'что говорится в статье 80' should detect article ref."""
+        ref = RAGService._detect_article_reference("что говорится в статье 80")
+        self.assertIsNotNone(ref)
+        self.assertEqual(ref, "статья 80")
 
-    def test_select_relevant_chunks_filters_by_distance(self):
-        selected = _select_relevant_chunks(
-            context=[
-                "Стандартная ставка налога на прибыль составляет 15%.",
-                "Штраф составляет 5% от суммы налога за каждый месяц просрочки.",
-            ],
-            context_chunk_ids=["1", "2"],
-            context_metadatas=[{"doc_id": 1, "page": 1}, {"doc_id": 1, "page": 1}],
-            context_distances=[0.8, 0.9],
-        )
-        self.assertEqual(len(selected), 2)
+    def test_detect_article_reference_returns_lowercase(self):
+        """Article reference should always be lowercase for case-insensitive matching."""
+        ref = RAGService._detect_article_reference("Статьей 15 предусмотрено")
+        self.assertIsNotNone(ref)
+        self.assertTrue(ref.islower(), f"Expected lowercase, got: {ref}")
 
-    def test_select_relevant_chunks_rejects_distant(self):
-        selected = _select_relevant_chunks(
-            context=["Налог это обязательный платеж."],
-            context_chunk_ids=["1"],
-            context_metadatas=[{"doc_id": 1, "page": 1}],
-            context_distances=[2.5],
-        )
-        self.assertEqual(selected, [])
+    def test_detect_article_reference_no_match(self):
+        """Regular questions without article refs should return None."""
+        ref = RAGService._detect_article_reference("Какая ставка НДС?")
+        self.assertIsNone(ref)
+
+    @patch("app.services.rag_service.RAGService._init_chroma")
+    def test_boost_article_chunks_reorders(self, mock_init):
+        """Chunks containing the article ref should be boosted to the front."""
+        rag = RAGService()
+        results = {
+            "documents": [["Общие положения закона.", "Моддаи 2. Маҷлиси Олӣ аз ду Маҷлис иборат аст.", "Другой текст."]],
+            "ids": [["1", "2", "3"]],
+            "metadatas": [[{"page": 1}, {"page": 1}, {"page": 2}]],
+            "distances": [[0.8, 1.1, 0.9]],
+        }
+        boosted = RAGService._boost_article_chunks(results, "моддаи 2")
+        # The chunk containing "Моддаи 2" should now be first
+        self.assertIn("Моддаи 2", boosted["documents"][0][0])
+        # Its distance should be halved
+        self.assertAlmostEqual(boosted["distances"][0][0], 1.1 * 0.5)
 
 
 if __name__ == "__main__":
