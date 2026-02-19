@@ -42,7 +42,11 @@ class DocumentService:
 
         content_type = (upload_file.content_type or "").lower()
         allowed_types = cls.MIME_BY_EXTENSION.get(ext, set())
-        if content_type and content_type not in allowed_types and content_type not in cls.GENERIC_MIME_TYPES:
+        if (
+            content_type
+            and content_type not in allowed_types
+            and content_type not in cls.GENERIC_MIME_TYPES
+        ):
             raise ValueError(
                 f"Invalid content type '{upload_file.content_type}' for extension '{ext}'"
             )
@@ -62,16 +66,16 @@ class DocumentService:
             return cls.extract_text_from_pdf(file_path)
         if extension == ".docx":
             text = cls.extract_text_from_docx(file_path)
-            return cls.agentic_chunk_text(text, page=1)
+            return cls.semantic_chunk_text(text, page=1)
         if extension == ".txt":
             text = cls.extract_text_from_txt(file_path)
-            return cls.agentic_chunk_text(text, page=1)
+            return cls.semantic_chunk_text(text, page=1)
         raise ValueError(f"Unsupported file extension: {extension}")
 
     @classmethod
     def extract_text_from_pdf(cls, file_path: str) -> List[dict]:
         """
-        Extract text from each page and then chunk using agentic splitter.
+        Extract text from each page and chunk using deterministic semantic splitter.
         Returns list: {"text": str, "page": int}
         """
         chunks: List[dict] = []
@@ -82,8 +86,7 @@ class DocumentService:
                     # If page is empty, might be scanned - but detection is separate.
                     # Just skip empty text.
                     continue
-                # Use agentic chunking for better semantic boundaries
-                page_chunks = cls.agentic_chunk_text(page_text, page=page_num + 1)
+                page_chunks = cls.semantic_chunk_text(page_text, page=page_num + 1)
                 chunks.extend(page_chunks)
         return chunks
 
@@ -95,7 +98,11 @@ class DocumentService:
             raise RuntimeError("DOCX support requires python-docx package") from exc
 
         doc = DocxDocument(file_path)
-        paragraphs = [paragraph.text.strip() for paragraph in doc.paragraphs if paragraph.text.strip()]
+        paragraphs = [
+            paragraph.text.strip()
+            for paragraph in doc.paragraphs
+            if paragraph.text.strip()
+        ]
         return "\n\n".join(paragraphs)
 
     @staticmethod
@@ -110,32 +117,40 @@ class DocumentService:
         Falls back to semantic_chunk_text logic if LLM fails or for optimization.
         """
         # Avoid circular import at module level
-        from app.services.rag_service import RAGService 
-        
+        from app.services.rag_service import RAGService
+
         rag_service = RAGService()
         clean_text = cls._normalize_text(text)
         if not clean_text:
             return []
-            
-        # 1. Split into propositions (sentences)
-        # Use simple splitting by punctuation
-        propositions = [p.strip() for p in re.split(r"(?<=[.!?։])\s+", clean_text) if p.strip()]
-        
+
+        # 1. Protect abbreviations before splitting
+        protected_text = cls._protect_abbreviations(clean_text)
+
+        # 2. Split into propositions (sentences)
+        # Use simple splitting by punctuation, but on protected text
+        raw_propositions = [
+            p.strip() for p in re.split(r"(?<=[.!?։])\s+", protected_text) if p.strip()
+        ]
+
+        # 3. Restore abbreviations in propositions
+        propositions = [cls._restore_abbreviations(p) for p in raw_propositions]
+
         chunks = []
         current_chunk = ""
-        
+
         for prop in propositions:
             # If current chunk is empty, just start with prop
             if not current_chunk:
                 current_chunk = prop
                 continue
-                
+
             # Hard size limit check - if adding prop exceeds MAX_CHUNK_SIZE, force split
             if len(current_chunk) + len(prop) > cls.MAX_CHUNK_SIZE:
                 chunks.append({"text": current_chunk, "page": page})
                 current_chunk = prop
                 continue
-                
+
             # Optimization: If current chunk is small (<300 chars), merge without asking LLM
             # This reduces LLM calls by ~50% while keeping reasonable minimum context
             if len(current_chunk) < 300:
@@ -143,18 +158,81 @@ class DocumentService:
                 continue
 
             # Agentic check
-            is_new_topic = rag_service.check_semantic_boundary(current_chunk, prop)
-            
+            try:
+                is_new_topic = rag_service.check_semantic_boundary(current_chunk, prop)
+            except Exception:
+                is_new_topic = False  # Fallback to merge
+
             if is_new_topic:
                 chunks.append({"text": current_chunk, "page": page})
                 current_chunk = prop
             else:
                 current_chunk = f"{current_chunk} {prop}"
-        
+
         if current_chunk:
             chunks.append({"text": current_chunk, "page": page})
-            
+
         return chunks
+
+    @staticmethod
+    def _protect_abbreviations(text: str) -> str:
+        """
+        Temporarily replace periods in known abbreviations to prevent incorrect sentence splitting.
+        """
+        # Common RU/TJ abbreviations + Context specific
+        abbrevs = [
+            r"конст",
+            r"мод",
+            r"с",
+            r"ст",
+            r"ш",
+            r"вып",
+            r"г",
+            r"н",
+            r"м",
+            r"обл",
+            r"тел",
+            r"кӯч",
+            r"хиёб",
+            r"пер",
+            r"ҳ",
+            r"ҷ",
+            r"б",
+        ]
+
+        # Use a unique placeholder for protected dot
+        placeholder = "<PR_DOT>"
+
+        protected_text = text
+
+        # Protect standard abbreviations: "word." -> "word<PR_DOT>"
+        for abbr in abbrevs:
+            # Case-insensitive replacement for abbr + dot + space or end of string
+            # We look for " word." to ensure we don't match inside words, but at start of word boundary
+            try:
+                pattern = re.compile(r"(?i)\b(" + abbr + r")\.", re.IGNORECASE)
+                protected_text = pattern.sub(r"\1" + placeholder, protected_text)
+            except re.error:
+                continue
+
+        # Protect "No. 123" or "№ 123" if they contain dots (less common but possible)
+        # Protect single letter initials: "А. Б. Зокиров" -> "А<PR_DOT> Б<PR_DOT> Зокиров"
+        # Look for single uppercase letter + dot + space
+        protected_text = re.sub(
+            r"\b([А-ЯЁӮҚҲҶҒIa-z])\.\s+", r"\1" + placeholder + " ", protected_text
+        )
+
+        # Protect list numbers: "1. Item" -> "1<PR_DOT> Item", "1.1. Item" -> "1<PR_DOT>1<PR_DOT> Item"
+        # Protect "digit + dot + space"
+        # We replace "(\d+)\." with "\1<PR_DOT>"
+        protected_text = re.sub(r"(\d+)\.(?=\s)", r"\1" + placeholder, protected_text)
+
+        return protected_text
+
+    @staticmethod
+    def _restore_abbreviations(text: str) -> str:
+        """Restore the protected periods."""
+        return text.replace("<PR_DOT>", ".")
 
     @classmethod
     def semantic_chunk_text(
@@ -178,15 +256,17 @@ class DocumentService:
         segments = cls._split_into_semantic_segments(clean_text)
         chunks: List[dict] = []
         current = ""
-        
+
         # Regex to detect if a segment starts with an Article/Chapter header
-        header_pattern = re.compile(r'^(?:СТАТЬЯ|МОДДАИ|БОБИ|ГЛАВА)\s+\d+', re.IGNORECASE)
+        header_pattern = re.compile(
+            r"^(?:СТАТЬЯ|МОДДАИ|БОБИ|ГЛАВА)\s+\d+", re.IGNORECASE
+        )
 
         for segment in segments:
             if not segment:
                 continue
-            
-            # If current segment is a specific Article/Chapter start, 
+
+            # If current segment is a specific Article/Chapter start,
             # we should force the previous 'current' to be a chunk (if it exists)
             # so that this Article starts fresh.
             if current and header_pattern.match(segment.strip()):
@@ -196,10 +276,14 @@ class DocumentService:
             # Split oversized segments before adding.
             if len(segment) > max_size:
                 for piece in cls._split_long_segment(segment, max_size):
-                    chunks, current = cls._append_piece(chunks, current, piece, page, max_size)
+                    chunks, current = cls._append_piece(
+                        chunks, current, piece, page, max_size
+                    )
                 continue
 
-            chunks, current = cls._append_piece(chunks, current, segment, page, max_size)
+            chunks, current = cls._append_piece(
+                chunks, current, segment, page, max_size
+            )
 
         if current.strip():
             chunks.append({"text": current.strip(), "page": page})
@@ -238,14 +322,18 @@ class DocumentService:
         return chunks, hard_pieces[-1].strip()
 
     @staticmethod
-    def _merge_small_chunks(chunks: List[dict], min_size: int, max_size: int) -> List[dict]:
+    def _merge_small_chunks(
+        chunks: List[dict], min_size: int, max_size: int
+    ) -> List[dict]:
         if not chunks:
             return chunks
 
         merged: List[dict] = []
-        
+
         # Regex to detect if a chunk starts with an Article/Chapter header
-        header_pattern = re.compile(r'^(?:СТАТЬЯ|МОДДАИ|БОБИ|ГЛАВА)\s+\d+', re.IGNORECASE)
+        header_pattern = re.compile(
+            r"^(?:СТАТЬЯ|МОДДАИ|БОБИ|ГЛАВА)\s+\d+", re.IGNORECASE
+        )
 
         for chunk in chunks:
             if not merged:
@@ -257,20 +345,20 @@ class DocumentService:
             prev_text = (prev.get("text") or "").strip()
             curr_text = (chunk.get("text") or "").strip()
             combined = f"{prev_text}\n\n{curr_text}".strip()
-            
+
             # Check if current chunk starts with a header. If so, don't merge it into the previous one,
             # unless the previous one is extremely small (e.g. just a stray character).
             is_header = bool(header_pattern.match(curr_text))
-            
+
             # Force merge if previous is tiny (< 50 chars), likely noise.
             force_merge = len(prev_text) < 50
-            
+
             should_merge = (
-                same_page 
-                and (len(prev_text) < min_size or len(curr_text) < min_size) 
+                same_page
+                and (len(prev_text) < min_size or len(curr_text) < min_size)
                 and len(combined) <= max_size
             )
-            
+
             if should_merge and (not is_header or force_merge):
                 prev["text"] = combined
             else:
@@ -294,7 +382,7 @@ class DocumentService:
         # 1. Split by "Article" or "Chapter" headers (Russian/Tajik).
         # regex looks for: newline + (СТАТЬЯ|МОДДАИ|БОБИ|ГЛАВА) + space + number
         # We use lookahead (?=...) so the delimiter stays at the start of the new chunk.
-        
+
         # Pattern explanation:
         # \n                  - Start with a newline (ensure it's a header, not inline ref)
         # (?=                 - Positive lookahead (match position, don't consume)
@@ -302,40 +390,50 @@ class DocumentService:
         #   \s+               - At least one space
         #   \d+               - A number
         # )
-        
+
         # We assume the text is already normalized (newlines are \n).
         # We prepend a newline to ensuring the first line is matched if it starts with Article.
-        dataset = "\n" + text 
-        
+        dataset = "\n" + text
+
         # Split using the lookahead pattern
-        segments = re.split(r'\n(?=(?:СТАТЬЯ|МОДДАИ|БОБИ|ГЛАВА)\s+\d+)', dataset, flags=re.IGNORECASE)
-        
+        segments = re.split(
+            r"\n(?=(?:СТАТЬЯ|МОДДАИ|БОБИ|ГЛАВА)\s+\d+)", dataset, flags=re.IGNORECASE
+        )
+
         final_segments = []
         for segment in segments:
             if not segment.strip():
                 continue
-            
+
             # If a segment is huge (e.g. intro text before articles), we still might want to split it by paragraphs
             if len(segment) > 2000:
-                paragraphs = [p.strip() for p in re.split(r"\n\s*\n", segment) if p.strip()]
+                paragraphs = [
+                    p.strip() for p in re.split(r"\n\s*\n", segment) if p.strip()
+                ]
                 final_segments.extend(paragraphs)
             else:
                 final_segments.append(segment.strip())
-                
+
         if final_segments:
             return final_segments
 
         # Fallback to paragraph chunks
-        paragraphs = [part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()]
+        paragraphs = [
+            part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()
+        ]
         if paragraphs:
             return paragraphs
-            
+
         # Fallback to sentence chunks
-        return [part.strip() for part in re.split(r"(?<=[.!?։])\s+", text) if part.strip()]
+        return [
+            part.strip() for part in re.split(r"(?<=[.!?։])\s+", text) if part.strip()
+        ]
 
     @classmethod
     def _split_long_segment(cls, text: str, max_size: int) -> List[str]:
-        sentence_parts = [part.strip() for part in re.split(r"(?<=[.!?։])\s+", text) if part.strip()]
+        sentence_parts = [
+            part.strip() for part in re.split(r"(?<=[.!?։])\s+", text) if part.strip()
+        ]
         if not sentence_parts:
             return cls._hard_split(text, max_size)
 
@@ -370,12 +468,15 @@ class DocumentService:
             curr_text = (chunks[i].get("text") or "").strip()
 
             # Only add overlap for chunks on the same page
-            if chunks[i].get("page") == chunks[i - 1].get("page") and len(prev_text) > overlap:
+            if (
+                chunks[i].get("page") == chunks[i - 1].get("page")
+                and len(prev_text) > overlap
+            ):
                 # Take the last `overlap` characters, try to break on a word boundary
                 tail = prev_text[-overlap:]
                 space_idx = tail.find(" ")
                 if space_idx > 0:
-                    tail = tail[space_idx + 1:]
+                    tail = tail[space_idx + 1 :]
                 curr_text = f"...{tail}\n\n{curr_text}"
 
             result.append({"text": curr_text, "page": chunks[i].get("page")})
@@ -383,7 +484,7 @@ class DocumentService:
 
     @staticmethod
     def _hard_split(text: str, max_size: int) -> List[str]:
-        return [text[i:i + max_size] for i in range(0, len(text), max_size)]
+        return [text[i : i + max_size] for i in range(0, len(text), max_size)]
 
     @staticmethod
     def is_scanned_pdf(file_path: str) -> bool:
