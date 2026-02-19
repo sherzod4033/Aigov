@@ -120,10 +120,20 @@ class DocumentService:
         segments = cls._split_into_semantic_segments(clean_text)
         chunks: List[dict] = []
         current = ""
+        
+        # Regex to detect if a segment starts with an Article/Chapter header
+        header_pattern = re.compile(r'^(?:СТАТЬЯ|МОДДАИ|БОБИ|ГЛАВА)\s+\d+', re.IGNORECASE)
 
         for segment in segments:
             if not segment:
                 continue
+            
+            # If current segment is a specific Article/Chapter start, 
+            # we should force the previous 'current' to be a chunk (if it exists)
+            # so that this Article starts fresh.
+            if current and header_pattern.match(segment.strip()):
+                chunks.append({"text": current.strip(), "page": page})
+                current = ""
 
             # Split oversized segments before adding.
             if len(segment) > max_size:
@@ -173,6 +183,10 @@ class DocumentService:
             return chunks
 
         merged: List[dict] = []
+        
+        # Regex to detect if a chunk starts with an Article/Chapter header
+        header_pattern = re.compile(r'^(?:СТАТЬЯ|МОДДАИ|БОБИ|ГЛАВА)\s+\d+', re.IGNORECASE)
+
         for chunk in chunks:
             if not merged:
                 merged.append(chunk)
@@ -183,8 +197,21 @@ class DocumentService:
             prev_text = (prev.get("text") or "").strip()
             curr_text = (chunk.get("text") or "").strip()
             combined = f"{prev_text}\n\n{curr_text}".strip()
-
-            if same_page and (len(prev_text) < min_size or len(curr_text) < min_size) and len(combined) <= max_size:
+            
+            # Check if current chunk starts with a header. If so, don't merge it into the previous one,
+            # unless the previous one is extremely small (e.g. just a stray character).
+            is_header = bool(header_pattern.match(curr_text))
+            
+            # Force merge if previous is tiny (< 50 chars), likely noise.
+            force_merge = len(prev_text) < 50
+            
+            should_merge = (
+                same_page 
+                and (len(prev_text) < min_size or len(curr_text) < min_size) 
+                and len(combined) <= max_size
+            )
+            
+            if should_merge and (not is_header or force_merge):
                 prev["text"] = combined
             else:
                 merged.append(chunk)
@@ -200,10 +227,46 @@ class DocumentService:
 
     @staticmethod
     def _split_into_semantic_segments(text: str) -> List[str]:
-        # Prefer paragraph chunks; fallback to sentence chunks.
+        # 1. Split by "Article" or "Chapter" headers (Russian/Tajik).
+        # regex looks for: newline + (СТАТЬЯ|МОДДАИ|БОБИ|ГЛАВА) + space + number
+        # We use lookahead (?=...) so the delimiter stays at the start of the new chunk.
+        
+        # Pattern explanation:
+        # \n                  - Start with a newline (ensure it's a header, not inline ref)
+        # (?=                 - Positive lookahead (match position, don't consume)
+        #   (?:СТАТЬЯ|МОДДАИ|БОБИ|ГЛАВА) - One of these words
+        #   \s+               - At least one space
+        #   \d+               - A number
+        # )
+        
+        # We assume the text is already normalized (newlines are \n).
+        # We prepend a newline to ensuring the first line is matched if it starts with Article.
+        dataset = "\n" + text 
+        
+        # Split using the lookahead pattern
+        segments = re.split(r'\n(?=(?:СТАТЬЯ|МОДДАИ|БОБИ|ГЛАВА)\s+\d+)', dataset, flags=re.IGNORECASE)
+        
+        final_segments = []
+        for segment in segments:
+            if not segment.strip():
+                continue
+            
+            # If a segment is huge (e.g. intro text before articles), we still might want to split it by paragraphs
+            if len(segment) > 2000:
+                paragraphs = [p.strip() for p in re.split(r"\n\s*\n", segment) if p.strip()]
+                final_segments.extend(paragraphs)
+            else:
+                final_segments.append(segment.strip())
+                
+        if final_segments:
+            return final_segments
+
+        # Fallback to paragraph chunks
         paragraphs = [part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()]
         if paragraphs:
             return paragraphs
+            
+        # Fallback to sentence chunks
         return [part.strip() for part in re.split(r"(?<=[.!?։])\s+", text) if part.strip()]
 
     @classmethod

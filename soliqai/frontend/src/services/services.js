@@ -5,21 +5,6 @@ export const chatService = {
     sendFeedback: (logId, rating) => api.post(`/logs/${logId}/rating`, { rating }),
 };
 
-export const faqService = {
-    getAll: ({ skip = 0, limit = 100, q = '', category = '' } = {}) => {
-        const params = new URLSearchParams();
-        params.set('skip', skip);
-        params.set('limit', limit);
-        if (q.trim()) params.set('q', q.trim());
-        if (category.trim()) params.set('category', category.trim());
-        return api.get(`/faq/?${params.toString()}`);
-    },
-    getCategories: () => api.get('/faq/categories'),
-    create: (data) => api.post('/faq/', data),
-    update: (id, data) => api.put(`/faq/${id}`, data),
-    delete: (id) => api.delete(`/faq/${id}`),
-};
-
 export const logsService = {
     getAll: ({ skip = 0, limit = 100, startDate, endDate } = {}) => {
         const params = new URLSearchParams();
@@ -30,7 +15,15 @@ export const logsService = {
         return api.get(`/logs/?${params.toString()}`);
     },
     getAnalytics: () => api.get('/analytics/'),
-    addToFaq: (logId, payload = {}) => api.post(`/logs/${logId}/to-faq`, payload),
+    exportCsv: ({ startDate, endDate } = {}) => {
+        const params = new URLSearchParams();
+        if (startDate) params.set('start_date', startDate);
+        if (endDate) params.set('end_date', endDate);
+        const queryString = params.toString();
+        return api.get(`/logs/export${queryString ? `?${queryString}` : ''}`, {
+            responseType: 'blob',
+        });
+    },
 };
 
 export const documentsService = {

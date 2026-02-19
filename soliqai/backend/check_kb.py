@@ -1,26 +1,16 @@
 import asyncio
 from sqlmodel import select
 from app.core.database import get_session
-from app.models.models import Document, FAQ, Chunk
+from app.models.models import Document, Chunk
 from app.services.rag_service import RAGService
 
 async def check_kb():
     async for session in get_session():
-        # Check FAQ
-        faq_statement = select(FAQ)
-        faq_result = await session.exec(faq_statement)
-        faqs = faq_result.all()
-        print(f"--- FAQ ({len(faqs)}) ---")
-        for faq in faqs[:5]:
-            print(f"ID: {faq.id} | Q: {faq.question[:50]}... | A: {faq.answer[:50]}...")
-        if len(faqs) > 5:
-            print("...")
-
         # Check Documents
         doc_statement = select(Document)
         doc_result = await session.exec(doc_statement)
         docs = doc_result.all()
-        print(f"\n--- Documents ({len(docs)}) ---")
+        print(f"--- Documents ({len(docs)}) ---")
         for doc in docs:
             print(f"ID: {doc.id} | Name: {doc.name} | Status: {doc.status}")
 

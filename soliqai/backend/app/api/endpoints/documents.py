@@ -116,6 +116,23 @@ async def read_documents(
     result = await session.exec(select(Document).offset(skip).limit(limit))
     return result.all()
 
+@router.get("/{id}/chunks", response_model=List[Chunk])
+async def get_document_chunks(
+    id: int,
+    session: AsyncSession = Depends(deps.get_session),
+    current_user: User = Depends(deps.get_current_active_superuser),
+) -> Any:
+    """
+    Get all chunks for a specific document.
+    """
+    doc = await session.get(Document, id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    result = await session.exec(select(Chunk).where(Chunk.doc_id == id).order_by(Chunk.page))
+    return result.all()
+
+
 @router.delete("/{id}", response_model=Document)
 async def delete_document(
     id: int,

@@ -1,11 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { logsService } from '../services/services';
 import {
-    AlertCircle,
     Download,
     Filter,
-    MessageSquare,
-    PlusCircle,
     ThumbsDown,
     ThumbsUp,
     Timer,
@@ -47,10 +44,10 @@ const AdminLogsPage = () => {
     const [logs, setLogs] = useState([]);
     const [analytics, setAnalytics] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
+    const [isExporting, setIsExporting] = useState(false);
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
     const [query, setQuery] = useState('');
-    const [isAddingFAQ, setIsAddingFAQ] = useState(null);
 
     const fetchData = useCallback(async (filters = {}) => {
         const from = filters.startDate ?? '';
@@ -87,18 +84,24 @@ const AdminLogsPage = () => {
         await fetchData({ startDate: '', endDate: '' });
     };
 
-    const handleAddToFaq = async (log) => {
-        if (!log?.id) return;
-
-        setIsAddingFAQ(log.id);
+    const handleExport = async () => {
+        setIsExporting(true);
         try {
-            await logsService.addToFaq(log.id, { category: 'from_logs', priority: 0 });
-            alert('Добавлено в FAQ');
+            const response = await logsService.exportCsv({ startDate, endDate });
+            const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' });
+            const url = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', `logs_export_${new Date().toISOString().slice(0, 19).replace(/[:-]/g, '')}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            window.URL.revokeObjectURL(url);
         } catch (error) {
-            console.error('Failed to add log to FAQ', error);
-            alert(error.response?.data?.detail || 'Не удалось добавить в FAQ');
+            console.error('Failed to export logs', error);
+            alert('Не удалось экспортировать логи');
         } finally {
-            setIsAddingFAQ(null);
+            setIsExporting(false);
         }
     };
 
@@ -119,14 +122,11 @@ const AdminLogsPage = () => {
     const avgResponseSeconds = avgResponseMs > 0 ? (avgResponseMs / 1000).toFixed(2) : '0.00';
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 px-4">
             <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                     <h2 className="text-3xl font-extrabold text-[#1f3a60]">Логи и Аналитика</h2>
-                    <div className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
-                        <span className="h-2 w-2 rounded-full bg-green-500"></span>
-                        Статус системы: Работает
-                    </div>
+
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3">
@@ -145,9 +145,9 @@ const AdminLogsPage = () => {
                         Фильтры
                     </Button>
 
-                    <Button type="button" variant="secondary">
+                    <Button type="button" variant="secondary" onClick={handleExport} disabled={isExporting}>
                         <Download className="h-4 w-4" />
-                        Экспорт отчета
+                        {isExporting ? 'Экспорт...' : 'Экспорт отчета'}
                     </Button>
 
                     <Button type="button" variant="ghost" onClick={resetDateFilter}>
@@ -220,18 +220,17 @@ const AdminLogsPage = () => {
                                 <th className="px-5 py-3 font-semibold">Время ответа</th>
                                 <th className="px-5 py-3 font-semibold">Отзыв</th>
                                 <th className="px-5 py-3 font-semibold">Создано</th>
-                                <th className="px-5 py-3 text-right font-semibold">Действия</th>
                             </tr>
                         </thead>
 
                         <tbody>
                             {isLoading ? (
                                 <tr>
-                                    <td colSpan="6" className="px-5 py-10 text-center text-sm text-slate-500">Загрузка...</td>
+                                    <td colSpan="5" className="px-5 py-10 text-center text-sm text-slate-500">Загрузка...</td>
                                 </tr>
                             ) : filteredLogs.length === 0 ? (
                                 <tr>
-                                    <td colSpan="6" className="px-5 py-10 text-center text-sm text-slate-500">Логи не найдены</td>
+                                    <td colSpan="5" className="px-5 py-10 text-center text-sm text-slate-500">Логи не найдены</td>
                                 </tr>
                             ) : (
                                 filteredLogs.map((log) => {
@@ -271,19 +270,6 @@ const AdminLogsPage = () => {
 
                                             <td className="px-5 py-3 text-slate-500">
                                                 {formatDateTime(log.created_at)}
-                                            </td>
-
-                                            <td className="px-5 py-3 text-right">
-                                                <Button
-                                                    type="button"
-                                                    size="sm"
-                                                    variant="ghost"
-                                                    onClick={() => handleAddToFaq(log)}
-                                                    disabled={isAddingFAQ === log.id}
-                                                >
-                                                    <PlusCircle className="h-4 w-4" />
-                                                    {isAddingFAQ === log.id ? 'Добавление...' : 'Добавить в FAQ'}
-                                                </Button>
                                             </td>
                                         </tr>
                                     );

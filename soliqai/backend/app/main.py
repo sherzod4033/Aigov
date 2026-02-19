@@ -9,7 +9,7 @@ setup_logging(
     level="DEBUG" if settings.ENVIRONMENT == "development" else "INFO"
 )
 logger = get_logger(__name__)
-from app.api.endpoints import auth, documents, chat, faq, logs, analytics, settings as runtime_settings
+from app.api.endpoints import auth, documents, chat, logs, analytics, settings as runtime_settings
 
 app = FastAPI(
     title="SoliqAI API",
@@ -34,7 +34,6 @@ app.include_router(auth.router, prefix=f"{settings.API_V1_STR}/auth", tags=["aut
 app.include_router(auth.router, prefix="/api/auth", tags=["auth-compat"])
 app.include_router(documents.router, prefix=f"{settings.API_V1_STR}/documents", tags=["documents"])
 app.include_router(chat.router, prefix=f"{settings.API_V1_STR}/chat", tags=["chat"])
-app.include_router(faq.router, prefix=f"{settings.API_V1_STR}/faq", tags=["faq"])
 app.include_router(logs.router, prefix=f"{settings.API_V1_STR}/logs", tags=["logs"])
 app.include_router(analytics.router, prefix=f"{settings.API_V1_STR}/analytics", tags=["analytics"])
 app.include_router(runtime_settings.router, prefix=f"{settings.API_V1_STR}/settings", tags=["settings"])

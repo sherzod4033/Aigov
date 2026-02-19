@@ -82,7 +82,7 @@ const SettingsPage = () => {
     }
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 px-4">
             <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                 <div className="mb-4 flex items-center gap-3">
                     <h2 className="text-3xl font-extrabold text-[#1f3a60]">Настройки выполнения</h2>

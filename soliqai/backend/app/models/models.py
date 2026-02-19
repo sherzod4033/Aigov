@@ -32,16 +32,6 @@ class Chunk(ChunkBase, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     doc_id: int = Field(foreign_key="document.id", ondelete="CASCADE")
 
-class FAQBase(SQLModel):
-    question: str
-    answer: str
-    category: Optional[str] = None
-    priority: int = Field(default=0)
-
-class FAQ(FAQBase, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
-
 class LogBase(SQLModel):
     question: str
     answer: str

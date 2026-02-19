@@ -11,7 +11,7 @@ from sqlmodel import select
 
 from app.api import deps
 from app.core.rate_limit import chat_limiter, check_rate_limit
-from app.models.models import User, Log, Document, FAQ
+from app.models.models import User, Log, Document
 from app.services.rag_service import RAGService
 from app.services.runtime_settings_service import RuntimeSettingsService
 
@@ -70,50 +70,6 @@ def _is_greeting(text: str) -> bool:
             if len(lowered.split()) <= 3:
                 return True
     return False
-
-
-def _faq_match_score(query: str, faq_question: str, rag_service: RAGService) -> float:
-    query_norm = rag_service.normalize_query(query)
-    faq_norm = rag_service.normalize_query(faq_question)
-    if not query_norm or not faq_norm:
-        return 0.0
-    if query_norm == faq_norm:
-        return 1.0
-    if query_norm in faq_norm or faq_norm in query_norm:
-        return 0.9
-
-    query_tokens = _tokenize(query_norm)
-    faq_tokens = _tokenize(faq_norm)
-    if not query_tokens:
-        return 0.0
-
-    overlap = len(query_tokens & faq_tokens)
-    return overlap / len(query_tokens)
-
-
-async def _find_best_faq(
-    session: AsyncSession,
-    question: str,
-    rag_service: RAGService,
-) -> FAQ | None:
-    result = await session.exec(select(FAQ))
-    faqs = result.all()
-
-    best_item: FAQ | None = None
-    best_score = 0.0
-
-    for faq in faqs:
-        score = _faq_match_score(question, faq.question, rag_service)
-        if score > best_score:
-            best_score = score
-            best_item = faq
-        elif score == best_score and best_item and faq.priority > best_item.priority:
-            best_item = faq
-
-    # Keep FAQ as high-confidence shortcut only.
-    if best_score >= 0.75:
-        return best_item
-    return None
 
 
 def _select_relevant_chunks(
@@ -245,29 +201,6 @@ async def chat(
     search_query = await rag_service.condense_query(normalized_question, chat_history, model=model)
     logger.debug(f"Condensed Search Query: {search_query}")
 
-    best_faq = await _find_best_faq(session, search_query, rag_service)
-    if best_faq:
-        faq_sources = [
-            SourceItem(
-                source_type="faq",
-                doc_name=f"FAQ: {best_faq.category or 'general'}",
-                category=best_faq.category,
-                chunk_id=f"faq-{best_faq.id}",
-                quote=best_faq.question,
-            )
-        ]
-        log_entry = Log(
-            question=chat_request.question,
-            answer=best_faq.answer,
-            sources=json.dumps([item.model_dump() for item in faq_sources], ensure_ascii=False),
-            time_ms=int((perf_counter() - started) * 1000),
-            user_id=current_user.id,
-        )
-        session.add(log_entry)
-        await session.commit()
-        await session.refresh(log_entry)
-        return ChatResponse(answer=best_faq.answer, sources=faq_sources, log_id=log_entry.id)
-    
     # 2. Search
     logger.debug(f"Querying ChromaDB with: {search_query}, top_k={top_k}")
     results = rag_service.query_documents(search_query, n_results=top_k)

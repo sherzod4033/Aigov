@@ -1,13 +1,15 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import {
     AlertTriangle,
     CheckCircle2,
     CloudUpload,
+    Eye,
     FileText,
     Loader2,
     MoreVertical,
     Trash2,
+    X,
 } from 'lucide-react';
 import api from '../services/api';
 import { Button } from '../components/ui/Button';
@@ -84,6 +86,16 @@ const AdminDocumentsPage = () => {
     const [uploadError, setUploadError] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
     const [searchTerm, setSearchTerm] = useState('');
+    const [isDragActive, setIsDragActive] = useState(false);
+    const [draggedFiles, setDraggedFiles] = useState([]);
+    const [chunksModal, setChunksModal] = useState({
+        isOpen: false,
+        docId: null,
+        docName: '',
+        chunks: [],
+        isLoading: false,
+        error: null,
+    });
 
     const {
         register,
@@ -104,6 +116,121 @@ const AdminDocumentsPage = () => {
             setIsLoading(false);
         }
     };
+
+    const validateFile = useCallback((file) => {
+        const ext = file.name.split('.').pop()?.toLowerCase() || '';
+        const hasAllowedExt = ALLOWED_EXTENSIONS.includes(ext);
+        const hasAllowedMime = ALLOWED_MIME_TYPES.has((file.type || '').toLowerCase());
+        return hasAllowedExt && hasAllowedMime;
+    }, []);
+
+    const handleDragEnter = useCallback((event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        setIsDragActive(true);
+        setUploadError('');
+    }, []);
+
+    const handleDragLeave = useCallback((event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        setIsDragActive(false);
+    }, []);
+
+    const handleDragOver = useCallback((event) => {
+        event.preventDefault();
+        event.stopPropagation();
+    }, []);
+
+    const handleDrop = useCallback((event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        setIsDragActive(false);
+
+        const files = Array.from(event.dataTransfer.files);
+        const validFiles = files.filter(validateFile);
+        const invalidFiles = files.filter((f) => !validateFile(f));
+
+        if (invalidFiles.length > 0) {
+            setUploadError(`Неподдерживаемые файлы: ${invalidFiles.map((f) => f.name).join(', ')}`);
+        }
+
+        if (validFiles.length > 0) {
+            setDraggedFiles(validFiles);
+            setUploadError('');
+        }
+    }, [validateFile]);
+
+    const uploadFiles = useCallback(async (files) => {
+        if (!files || files.length === 0) return;
+
+        setIsUploading(true);
+        setUploadError('');
+
+        const uploadPromises = files.map(async (file) => {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                await api.post('/documents/upload', formData, {
+                    headers: { 'Content-Type': 'multipart/form-data' },
+                });
+                return { success: true, name: file.name };
+            } catch (error) {
+                return { success: false, name: file.name, error: error.response?.data?.detail || 'Ошибка загрузки' };
+            }
+        });
+
+        const results = await Promise.all(uploadPromises);
+        const failed = results.filter((r) => !r.success);
+
+        if (failed.length > 0) {
+            setUploadError(`Не удалось загрузить: ${failed.map((f) => f.name).join(', ')}`);
+        }
+
+        setDraggedFiles([]);
+        reset();
+        await fetchDocuments();
+        setIsUploading(false);
+    }, [reset]);
+
+    const fetchChunks = useCallback(async (docId, docName) => {
+        setChunksModal({
+            isOpen: true,
+            docId,
+            docName,
+            chunks: [],
+            isLoading: true,
+            error: null,
+        });
+
+        try {
+            const response = await api.get(`/documents/${docId}/chunks`);
+            setChunksModal((prev) => ({
+                ...prev,
+                chunks: response.data || [],
+                isLoading: false,
+            }));
+        } catch (error) {
+            console.error('Failed to fetch chunks:', error);
+            setChunksModal((prev) => ({
+                ...prev,
+                isLoading: false,
+                error: error.response?.data?.detail || 'Не удалось загрузить фрагменты',
+            }));
+        }
+    }, []);
+
+    const closeChunksModal = useCallback(() => {
+        setChunksModal({
+            isOpen: false,
+            docId: null,
+            docName: '',
+            chunks: [],
+            isLoading: false,
+            error: null,
+        });
+    }, []);
 
     useEffect(() => {
         fetchDocuments();
@@ -182,7 +309,7 @@ const AdminDocumentsPage = () => {
     };
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 px-4">
             <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                 <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
@@ -200,11 +327,29 @@ const AdminDocumentsPage = () => {
                     />
                 </div>
 
-                <form onSubmit={handleSubmit(onUpload)} className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
-                    <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-[#1f3a60]/10 text-[#1f3a60]">
-                        <CloudUpload className="h-7 w-7" />
+                <div
+                    onDragEnter={handleDragEnter}
+                    onDragLeave={handleDragLeave}
+                    onDragOver={handleDragOver}
+                    onDrop={handleDrop}
+                    className={cn(
+                        'rounded-2xl border-2 border-dashed p-8 text-center transition-all duration-200',
+                        isDragActive
+                            ? 'border-[#1f3a60] bg-[#1f3a60]/5'
+                            : 'border-slate-300 bg-slate-50',
+                    )}
+                >
+                    <div className={cn(
+                        'mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full transition-all duration-200',
+                        isDragActive
+                            ? 'bg-[#1f3a60] text-white'
+                            : 'bg-[#1f3a60]/10 text-[#1f3a60]',
+                    )}>
+                        <CloudUpload className={cn('h-7 w-7', isDragActive && 'animate-bounce')} />
                     </div>
-                    <h3 className="text-2xl font-bold text-slate-800">Перетащите файлы сюда</h3>
+                    <h3 className="text-2xl font-bold text-slate-800">
+                        {isDragActive ? 'Отпустите файлы для загрузки' : 'Перетащите файлы сюда'}
+                    </h3>
                     <p className="mt-1 text-sm text-slate-500">Поддерживаемые форматы: PDF, DOCX, TXT (Макс. 50МБ)</p>
 
                     <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
@@ -215,11 +360,26 @@ const AdminDocumentsPage = () => {
                                 type="file"
                                 className="hidden"
                                 accept=".pdf,.docx,.txt,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                                {...register('file', { required: true })}
+                                {...register('file')}
+                                onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    if (file) {
+                                        if (validateFile(file)) {
+                                            setDraggedFiles([file]);
+                                            setUploadError('');
+                                        } else {
+                                            setUploadError('Разрешенные форматы: PDF, DOCX, TXT');
+                                        }
+                                    }
+                                }}
                             />
                         </label>
 
-                        <Button type="submit" disabled={isUploading || !selectedFile}>
+                        <Button
+                            type="button"
+                            disabled={isUploading || (draggedFiles.length === 0 && !selectedFile)}
+                            onClick={() => uploadFiles(draggedFiles.length > 0 ? draggedFiles : selectedFile ? [selectedFile] : [])}
+                        >
                             {isUploading ? (
                                 <>
                                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -231,16 +391,18 @@ const AdminDocumentsPage = () => {
                         </Button>
                     </div>
 
-                    {selectedFile && (
-                        <p className="mt-3 text-sm font-semibold text-slate-600">
-                            Выбрано: {selectedFile.name}
-                        </p>
+                    {(draggedFiles.length > 0 || selectedFile) && (
+                        <div className="mt-4 rounded-lg bg-emerald-50 p-3">
+                            <p className="text-sm font-semibold text-emerald-700">
+                                К загрузке: {(draggedFiles.length > 0 ? draggedFiles : selectedFile ? [selectedFile] : []).map((f) => f.name).join(', ')}
+                            </p>
+                        </div>
                     )}
 
                     {uploadError && (
                         <p className="mt-3 text-sm font-semibold text-red-600">{uploadError}</p>
                     )}
-                </form>
+                </div>
             </section>
 
             <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -347,17 +509,19 @@ const AdminDocumentsPage = () => {
                                                 <div className="inline-flex items-center gap-1">
                                                     <button
                                                         type="button"
+                                                        onClick={() => fetchChunks(doc.id, doc.name)}
+                                                        className="rounded-md p-1.5 text-slate-500 transition hover:bg-blue-50 hover:text-blue-600"
+                                                        title="Просмотреть фрагменты"
+                                                    >
+                                                        <Eye className="h-4 w-4" />
+                                                    </button>
+                                                    <button
+                                                        type="button"
                                                         onClick={() => onDelete(doc.id)}
                                                         className="rounded-md p-1.5 text-slate-500 transition hover:bg-red-50 hover:text-red-600"
                                                         title="Удалить"
                                                     >
                                                         <Trash2 className="h-4 w-4" />
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        className="rounded-md p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
-                                                    >
-                                                        <MoreVertical className="h-4 w-4" />
                                                     </button>
                                                 </div>
                                             </td>
@@ -369,6 +533,68 @@ const AdminDocumentsPage = () => {
                     </table>
                 </div>
             </section>
+
+            {/* Chunks Modal */}
+            {chunksModal.isOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+                    <div className="max-h-[90vh] w-full max-w-4xl overflow-hidden rounded-2xl bg-white shadow-xl">
+                        <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+                            <div>
+                                <h3 className="text-lg font-bold text-slate-800">Фрагменты документа</h3>
+                                <p className="text-sm text-slate-500">{chunksModal.docName}</p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={closeChunksModal}
+                                className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+                            >
+                                <X className="h-5 w-5" />
+                            </button>
+                        </div>
+
+                        <div className="max-h-[calc(90vh-80px)] overflow-y-auto p-6">
+                            {chunksModal.isLoading ? (
+                                <div className="flex items-center justify-center py-12 text-slate-500">
+                                    <Loader2 className="h-6 w-6 animate-spin" />
+                                    <span className="ml-2">Загрузка фрагментов...</span>
+                                </div>
+                            ) : chunksModal.error ? (
+                                <div className="rounded-lg bg-red-50 p-4 text-center text-red-600">
+                                    {chunksModal.error}
+                                </div>
+                            ) : chunksModal.chunks.length === 0 ? (
+                                <div className="rounded-lg bg-slate-50 p-8 text-center text-slate-500">
+                                    Фрагменты не найдены. Возможно, документ еще индексируется.
+                                </div>
+                            ) : (
+                                <div className="space-y-4">
+                                    <div className="mb-4 text-sm text-slate-500">
+                                        Всего фрагментов: <span className="font-semibold text-slate-700">{chunksModal.chunks.length}</span>
+                                    </div>
+                                    {chunksModal.chunks.map((chunk, index) => (
+                                        <div
+                                            key={chunk.id || index}
+                                            className="rounded-xl border border-slate-200 bg-slate-50 p-4"
+                                        >
+                                            <div className="mb-2 flex items-center gap-2">
+                                                <span className="rounded-full bg-[#1f3a60]/10 px-2 py-0.5 text-xs font-semibold text-[#1f3a60]">
+                                                    Страница {chunk.page || '?'}
+                                                </span>
+                                                <span className="text-xs text-slate-400">
+                                                    ID: {chunk.id}
+                                                </span>
+                                            </div>
+                                            <p className="text-sm leading-relaxed text-slate-700 whitespace-pre-wrap">
+                                                {chunk.text}
+                                            </p>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

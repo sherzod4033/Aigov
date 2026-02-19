@@ -281,6 +281,39 @@ class RAGService:
             print(f"Query Condensation Error: {e}")
             return query
 
+    @staticmethod
+    def _detect_article_reference(query: str) -> str | None:
+        """
+        Detects if the query is asking for a specific article number.
+        Returns the likely string format in the document (e.g., "СТАТЬЯ 80").
+        """
+        q = query.lower()
+        
+        # Russian: "статья 80", "ст. 80", "80 статья", "80 статье", "статью 80", "статьей 80"
+        # Match "word number"
+        # [яеийю] covers статья, статье, статьи, статью. 
+        # For 'статьей' we can use 'стать(?:ей|[яеийю])' or simply `стать[а-я]+` but let's be specific.
+        # Let's use `стать[яеийю]+` to catch endings.
+        match_ru_prefix = re.search(r"\b(?:стать[яеийю]+|ст\.?)\s*(\d+)", q)
+        if match_ru_prefix:
+            return f"СТАТЬЯ {match_ru_prefix.group(1)}"
+            
+        # Match "number word"
+        match_ru_suffix = re.search(r"\b(\d+)\s*(?:стать[яеийю]+|ст\.?)", q)
+        if match_ru_suffix:
+            return f"СТАТЬЯ {match_ru_suffix.group(1)}"
+            
+        # Tajik: "моддаи 80", "80 мақола"
+        match_tj_prefix = re.search(r"\b(?:моддаи?|мод\.?)\s*(\d+)", q)
+        if match_tj_prefix:
+            return f"МОДДАИ {match_tj_prefix.group(1)}"
+            
+        match_tj_suffix = re.search(r"\b(\d+)\s*(?:мақола|моддаи?)", q)
+        if match_tj_suffix:
+            return f"МОДДАИ {match_tj_suffix.group(1)}"
+            
+        return None
+
     def query_documents(self, query_text: str, n_results: int = 5) -> Dict:
         self._init_chroma()
         if self.collection is None:
@@ -290,10 +323,18 @@ class RAGService:
                 "metadatas": [[]],
                 "distances": [[]],
             }
+        
+        where_doc = None
+        article_ref = self._detect_article_reference(query_text)
+        if article_ref:
+            # If specific article is requested, filter chunks to contain that string.
+            # This is a heuristic to fix embedding retrieval issues for specific short articles.
+            where_doc = {"$contains": article_ref}
 
         return self.collection.query(
             query_texts=[query_text],
-            n_results=n_results
+            n_results=n_results,
+            where_document=where_doc
         )
 
     async def generate_answer(

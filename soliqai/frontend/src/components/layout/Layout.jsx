@@ -3,7 +3,6 @@ import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
     Bell,
     ChartNoAxesCombined,
-    CircleHelp,
     FileText,
     LogOut,
     MessageSquare,
@@ -17,7 +16,6 @@ import { cn } from '../../lib/utils';
 const NAV_ITEMS = [
     { name: 'Чат', href: '/', icon: MessageSquare },
     { name: 'Документы', href: '/admin/documents', icon: FileText },
-    { name: 'FAQ', href: '/admin/faq', icon: CircleHelp },
     { name: 'Логи', href: '/admin/logs', icon: ChartNoAxesCombined },
     { name: 'Настройки', href: '/settings', icon: Settings },
 ];
@@ -28,9 +26,6 @@ const resolvePageMeta = (pathname) => {
     }
     if (pathname.startsWith('/admin/documents')) {
         return { title: 'Документы', badge: 'Центр документов', searchPlaceholder: 'Поиск документов...' };
-    }
-    if (pathname.startsWith('/admin/faq')) {
-        return { title: 'Управление FAQ', badge: 'База знаний', searchPlaceholder: 'Поиск по ключевым словам...' };
     }
     if (pathname.startsWith('/admin/logs')) {
         return { title: 'Логи и Аналитика', badge: 'Мониторинг', searchPlaceholder: 'Поиск по ID запроса...' };
