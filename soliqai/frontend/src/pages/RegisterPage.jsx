@@ -59,7 +59,7 @@ const RegisterPage = () => {
                                     <Shield className="h-6 w-6" />
                                 </div>
                                 <div className="text-left">
-                                    <p className="text-4xl font-extrabold leading-none text-[#1f3a60]">Soliq<span className="text-[#c5a059]">AI</span></p>
+                                    <p className="text-4xl font-extrabold leading-none text-[#1f3a60]">Soleh<span className="text-[#c5a059]">AI</span></p>
                                     <p className="mt-1 text-sm font-semibold text-slate-500">Создание нового аккаунта</p>
                                 </div>
                             </div>
@@ -138,7 +138,7 @@ const RegisterPage = () => {
                 </main>
 
                 <footer className="pb-2 text-center text-xs font-medium text-white/55">
-                    SoliqAI Systems v1.0.4
+                    SolehAI Systems v1.0.4
                 </footer>
             </div>
         </div>
