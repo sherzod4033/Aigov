@@ -12,8 +12,8 @@ logger = get_logger(__name__)
 from app.api.endpoints import auth, documents, chat, logs, analytics, settings as runtime_settings
 
 app = FastAPI(
-    title="SolehAI API",
-    description="Backend for SolehAI - Tax Assistant for Tajikistan",
+    title="AndozAI API",
+    description="Backend for AndozAI - Tax Assistant for Tajikistan",
     version="0.1.0",
     openapi_url=f"{settings.API_V1_STR}/openapi.json"
 )
@@ -41,7 +41,7 @@ app.include_router(runtime_settings.router, prefix=f"{settings.API_V1_STR}/setti
 
 @app.get("/", tags=["root"])
 async def root():
-    return {"message": "Welcome to SolehAI API", "version": "0.1.0"}
+    return {"message": "Welcome to AndozAI API", "version": "0.1.0"}
 
 
 @app.get("/health", tags=["health"])
@@ -52,7 +52,7 @@ async def health_check():
     """
     return {
         "status": "healthy",
-        "service": "soliqai-api",
+        "service": "andozai-api",
         "version": "0.1.0",
         "environment": settings.ENVIRONMENT
     }

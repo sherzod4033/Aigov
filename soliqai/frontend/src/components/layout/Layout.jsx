@@ -21,7 +21,7 @@ const NAV_ITEMS = [
 
 const resolvePageMeta = (pathname) => {
     if (pathname === '/') {
-        return { title: 'SolehAI', badge: 'Налоговый помощник', searchPlaceholder: 'Введите ваш вопрос...' };
+        return { title: 'AndozAI', badge: 'Налоговый помощник', searchPlaceholder: 'Введите ваш вопрос...' };
     }
     if (pathname.startsWith('/admin/documents')) {
         return { title: 'Документы', badge: 'Центр документов', searchPlaceholder: 'Поиск документов...' };
@@ -33,7 +33,7 @@ const resolvePageMeta = (pathname) => {
         return { title: 'Настройки', badge: 'Система', searchPlaceholder: 'Поиск пользователей...' };
     }
 
-    return { title: 'SolehAI', badge: 'Портал', searchPlaceholder: 'Поиск...' };
+    return { title: 'AndozAI', badge: 'Портал', searchPlaceholder: 'Поиск...' };
 };
 
 const isActiveLink = (pathname, href) => pathname === href || (href !== '/' && pathname.startsWith(`${href}/`));
@@ -64,7 +64,7 @@ const Layout = () => {
         const username = payload?.sub || 'Пользователь';
         return {
             username,
-            email: `${username}@soleh.tj`,
+            email: `${username}@andoz.tj`,
         };
     }, []);
 
@@ -109,7 +109,7 @@ const Layout = () => {
                         S
                     </div>
                     <div>
-                        <p className="text-2xl font-bold leading-none">SolehAI</p>
+                        <p className="text-2xl font-bold leading-none">AndozAI</p>
                     </div>
                 </div>
 

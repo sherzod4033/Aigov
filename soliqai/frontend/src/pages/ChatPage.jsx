@@ -8,7 +8,7 @@ import { cn } from '../lib/utils';
 
 const INITIAL_ASSISTANT_MESSAGE = {
     role: 'assistant',
-    content: 'Здравствуйте! Я SolehAI, ваш налоговый помощник. Задавайте вопросы.',
+    content: 'Здравствуйте! Я AndozAI, ваш налоговый помощник. Задавайте вопросы.',
 };
 
 const QUICK_QUESTIONS = [
@@ -18,7 +18,7 @@ const QUICK_QUESTIONS = [
     'Найти ближайшую налоговую инспекцию',
 ];
 
-const CHAT_HISTORY_STORAGE_PREFIX = 'solehai.chat.history.';
+const CHAT_HISTORY_STORAGE_PREFIX = 'andozai.chat.history.';
 const MAX_PERSISTED_MESSAGES = 100;
 const PENDING_MESSAGE_TTL_MS = 600000; // 10 минут — LLM отвечает до 5+ мин
 const PENDING_PLACEHOLDER_TEXT = 'Думаю...';
@@ -481,7 +481,7 @@ const ChatPage = () => {
                     </form>
 
                     <p className="mt-2 text-center text-[11px] font-medium text-slate-400">
-                        SolehAI может ошибаться. Проверяйте важную информацию в официальном Налоговом кодексе Таджикистана.
+                        AndozAI может ошибаться. Проверяйте важную информацию в официальном Налоговом кодексе Таджикистана.
                     </p>
                 </div>
             </div>

@@ -38,7 +38,7 @@ while true; do
     break
   fi
 
-  status_code="$(curl -sS -o /tmp/soliqai_stability_response.json -w "%{http_code}" \
+  status_code="$(curl -sS -o /tmp/andozai_stability_response.json -w "%{http_code}" \
     -X POST "${CHAT_URL}" \
     -H "Authorization: Bearer ${token}" \
     -H "Content-Type: application/json" \
@@ -49,7 +49,7 @@ while true; do
     echo "[OK] request #$((ok_count + fail_count))"
   else
     fail_count=$((fail_count + 1))
-    echo "[FAIL] status=${status_code} body=$(cat /tmp/soliqai_stability_response.json)"
+    echo "[FAIL] status=${status_code} body=$(cat /tmp/andozai_stability_response.json)"
   fi
 
   sleep "${INTERVAL_SECONDS}"

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Development server runner for SoliqAI backend.
+Development server runner for AndozAI backend.
 For production, use: uvicorn app.main:app --host 0.0.0.0 --port 8001 --workers 4
 """
 
@@ -9,7 +9,7 @@ import uvicorn
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run SoliqAI backend server")
+    parser = argparse.ArgumentParser(description="Run AndozAI backend server")
     parser.add_argument(
         "--host",
         default="0.0.0.0",
@@ -37,7 +37,7 @@ def main():
     
     print(f"""
 ╔══════════════════════════════════════════════════════════╗
-║                   SoliqAI Backend                        ║
+║                   AndozAI Backend                        ║
 ╠══════════════════════════════════════════════════════════╣
 ║  Server: http://{args.host}:{args.port:<5}                      ║
 ║  Docs:   http://{args.host}:{args.port}/api/v1/docs              ║

@@ -7,7 +7,7 @@ document = Document()
 document.add_heading('Справочник Налогоплательщика (Тестовый)', 0)
 
 # Intro
-p = document.add_paragraph('Этот документ создан для тестирования системы SoliqAI. ')
+p = document.add_paragraph('Этот документ создан для тестирования системы AndozAI. ')
 p.add_run('Он содержит базовые примеры статей и правил.').bold = True
 
 # Article 1

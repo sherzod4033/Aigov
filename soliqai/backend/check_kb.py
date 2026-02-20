@@ -25,7 +25,7 @@ async def check_kb():
         rag = RAGService()
         if rag.collection:
             count = rag.collection.count()
-            print(f"\n--- ChromaDB (soliqai_docs) ---")
+            print(f"\n--- ChromaDB (andozai_docs) ---")
             print(f"Count: {count}")
             if count > 0:
                 peek = rag.collection.peek(limit=1)

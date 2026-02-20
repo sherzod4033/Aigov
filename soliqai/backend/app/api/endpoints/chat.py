@@ -199,9 +199,9 @@ async def chat(
 
     if _is_greeting(chat_request.question):
         greeting_answer = (
-            "Салом! Ман SolehAI, ёрдамчии шумо оид ба андоз. Ба ман савол диҳед."
+            "Салом! Ман AndozAI, ёрдамчии шумо оид ба андоз. Ба ман савол диҳед."
             if language == "tj"
-            else "Здравствуйте! Я SolehAI, ваш налоговый помощник. Задавайте вопросы."
+            else "Здравствуйте! Я AndozAI, ваш налоговый помощник. Задавайте вопросы."
         )
         empty_sources: List[SourceItem] = []
         log_entry = Log(

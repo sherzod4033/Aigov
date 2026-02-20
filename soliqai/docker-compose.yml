@@ -3,24 +3,24 @@ version: '3.8'
 services:
   postgres:
     image: postgres:15.2-alpine
-    container_name: soliqai-postgres
+    container_name: andozai-postgres
     environment:
-      POSTGRES_USER: soliqai_user
-      POSTGRES_PASSWORD: soliqai_password
-      POSTGRES_DB: soliqai_db
+      POSTGRES_USER: andozai_user
+      POSTGRES_PASSWORD: andozai_password
+      POSTGRES_DB: andozai_db
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U soliqai_user -d soliqai_db"]
+      test: ["CMD-SHELL", "pg_isready -U andozai_user -d andozai_db"]
       interval: 5s
       timeout: 5s
       retries: 5
 
   chromadb:
     image: chromadb/chroma:latest
-    container_name: soliqai-chromadb
+    container_name: andozai-chromadb
     ports:
       - "8000:8000"
     volumes:
@@ -33,16 +33,16 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: soliqai-backend
+    container_name: andozai-backend
     ports:
       - "8001:8001"
     environment:
       - ENVIRONMENT=production
       - POSTGRES_SERVER=postgres
       - POSTGRES_PORT=5432
-      - POSTGRES_USER=soliqai_user
-      - POSTGRES_PASSWORD=soliqai_password
-      - POSTGRES_DB=soliqai_db
+      - POSTGRES_USER=andozai_user
+      - POSTGRES_PASSWORD=andozai_password
+      - POSTGRES_DB=andozai_db
       - CHROMA_HOST=chromadb
       - CHROMA_PORT=8000
       - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
@@ -62,7 +62,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    container_name: soliqai-frontend
+    container_name: andozai-frontend
     ports:
       - "80:80"
     depends_on:

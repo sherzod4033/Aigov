@@ -1,4 +1,4 @@
-# 🏛️ SoliqAI
+# 🏛️ AndozAI
 
 Локальный ИИ-помощник по налогам.
 
@@ -46,7 +46,7 @@ cp .env.example .env
 
 ```bash
 # Создать базу данных PostgreSQL
-createdb soliqai_db
+createdb andozai_db
 
 # Инициализация таблиц
 cd backend

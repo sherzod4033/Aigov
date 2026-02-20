@@ -86,7 +86,7 @@ class RAGService:
         persist_dir.mkdir(parents=True, exist_ok=True)
         attempts.append(lambda: chromadb.PersistentClient(path=str(persist_dir)))
 
-        tmp_dir = Path("/tmp/soliqai-chroma")
+        tmp_dir = Path("/tmp/andozai-chroma")
         tmp_dir.mkdir(parents=True, exist_ok=True)
         attempts.append(lambda: chromadb.PersistentClient(path=str(tmp_dir)))
 
@@ -99,7 +99,7 @@ class RAGService:
             try:
                 client = create_client()
                 collection = client.get_or_create_collection(
-                    name="soliqai_docs_multilingual",
+                    name="andozai_docs_multilingual",
                     embedding_function=ef,
                 )
                 self.chroma_client = client
@@ -469,7 +469,7 @@ class RAGService:
                 history_str += f"{role}: {msg['content']}\n"
 
         prompt = (
-            "You are SolehAI, a tax assistant. Answer the user question based on the provided context and history.\n"
+            "You are AndozAI, a tax assistant. Answer the user question based on the provided context and history.\n"
             "Rules:\n"
             "1) Use ONLY factual information from the provided context.\n"
             "2) Adaptive Style: You can adapt the explanation style (e.g., simpler language, child-friendly) if the user asks, but do not invent new tax rules.\n"

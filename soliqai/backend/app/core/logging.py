@@ -1,5 +1,5 @@
 """
-Logging configuration for SoliqAI.
+Logging configuration for AndozAI.
 """
 
 import logging

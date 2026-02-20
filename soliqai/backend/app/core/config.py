@@ -4,16 +4,16 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    PROJECT_NAME: str = "SoliqAI"
+    PROJECT_NAME: str = "AndozAI"
     API_V1_STR: str = "/api/v1"
     ENVIRONMENT: str = "development"
     
     # Database
-    POSTGRES_USER: str = "soliqai_user"
-    POSTGRES_PASSWORD: str = "soliqai_password"
+    POSTGRES_USER: str = "andozai_user"
+    POSTGRES_PASSWORD: str = "andozai_password"
     POSTGRES_SERVER: str = "localhost"
     POSTGRES_PORT: int = 5432
-    POSTGRES_DB: str = "soliqai_db"
+    POSTGRES_DB: str = "andozai_db"
     
     @property
     def SQLALCHEMY_DATABASE_URI(self) -> str:

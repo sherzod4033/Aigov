@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# SoliqAI Quick Start Script
+# AndozAI Quick Start Script
 
-echo "🚀 Starting SoliqAI..."
+echo "🚀 Starting AndozAI..."
 echo
 
 POSTGRES_HOST="${POSTGRES_SERVER:-localhost}"
@@ -29,29 +29,29 @@ if ! check_postgres; then
     echo "🔄 Attempting to start/resume Docker services..."
 
     # Start/Run PostgreSQL
-    if docker ps -a --format '{{.Names}}' | grep -q "^soliqai-postgres$"; then
-        echo "   Starting existing soliqai-postgres container..."
-        docker start soliqai-postgres >/dev/null
+    if docker ps -a --format '{{.Names}}' | grep -q "^andozai-postgres$"; then
+        echo "   Starting existing andozai-postgres container..."
+        docker start andozai-postgres >/dev/null
     else
-        echo "   Creating and starting new soliqai-postgres container..."
-        docker run --name soliqai-postgres \
-            -e POSTGRES_PASSWORD=soliqai_password \
-            -e POSTGRES_USER=soliqai_user \
-            -e POSTGRES_DB=soliqai_db \
+        echo "   Creating and starting new andozai-postgres container..."
+        docker run --name andozai-postgres \
+            -e POSTGRES_PASSWORD=andozai_password \
+            -e POSTGRES_USER=andozai_user \
+            -e POSTGRES_DB=andozai_db \
             -p 5432:5432 \
             -v postgres_data:/var/lib/postgresql/data \
             -d postgres:15.2-alpine >/dev/null
     fi
 
     # Start/Run ChromaDB (check independently or just ensure it is running)
-    if docker ps -a --format '{{.Names}}' | grep -q "^soliqai-chromadb$"; then
-         if ! docker ps --format '{{.Names}}' | grep -q "^soliqai-chromadb$"; then
-            echo "   Starting existing soliqai-chromadb container..."
-            docker start soliqai-chromadb >/dev/null
+    if docker ps -a --format '{{.Names}}' | grep -q "^andozai-chromadb$"; then
+         if ! docker ps --format '{{.Names}}' | grep -q "^andozai-chromadb$"; then
+            echo "   Starting existing andozai-chromadb container..."
+            docker start andozai-chromadb >/dev/null
          fi
     else
-        echo "   Creating and starting new soliqai-chromadb container..."
-        docker run --name soliqai-chromadb \
+        echo "   Creating and starting new andozai-chromadb container..."
+        docker run --name andozai-chromadb \
             -p 8000:8000 \
             -v chroma_data:/chroma/chroma \
             -e IS_PERSISTENT=TRUE \
@@ -102,7 +102,7 @@ cd ..
 
 echo
 echo "═══════════════════════════════════════════════════════════"
-echo "  SoliqAI is starting up..."
+echo "  AndozAI is starting up..."
 echo "═══════════════════════════════════════════════════════════"
 echo
 echo "  Backend:  http://localhost:8001"
