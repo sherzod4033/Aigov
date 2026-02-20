@@ -307,9 +307,9 @@ class RAGService:
     @staticmethod
     def _detect_article_reference(query: str) -> str | None:
         """
-        Detects if the query is asking for a specific article number.
+        Detects if the query is asking for a specific article or law number.
         Returns a lowercase search string for case-insensitive matching
-        (e.g., "статья 80", "моддаи 2").
+        (e.g., "статья 80", "моддаи 2", "закон 243", "пункт 10").
         """
         q = query.lower()
 
@@ -331,6 +331,24 @@ class RAGService:
         if match_tj_suffix:
             return f"моддаи {match_tj_suffix.group(1)}"
 
+        # Russian: "N закон", "закон N", "N-й закон", "законе N" (numbered bibliographic list item)
+        match_law_suffix = re.search(r"(\d+)\s*-?(?:й|ый|ого)?\s*закон", q)
+        if match_law_suffix:
+            return f"закон {match_law_suffix.group(1)}"
+
+        match_law_prefix = re.search(r"\bзакон[а-яё]*\s*(\d+)", q)
+        if match_law_prefix:
+            return f"закон {match_law_prefix.group(1)}"
+
+        # Russian: "пункт N", "п. N" (numbered list item reference)
+        match_punkt = re.search(r"(?:пункт[а-яё]*|п\.?)\s*(\d+)", q)
+        if match_punkt:
+            return f"пункт {match_punkt.group(1)}"
+
+        match_punkt_suffix = re.search(r"(\d+)\s*-?\s*(?:пункт[а-яё]*)", q)
+        if match_punkt_suffix:
+            return f"пункт {match_punkt_suffix.group(1)}"
+
         return None
 
     @staticmethod
@@ -349,25 +367,31 @@ class RAGService:
         dists = results["distances"][0]
 
         ref_lower = article_ref.lower()
-        # Also build a pattern like "Моддаи 2" (title-case) variations
-        # to catch exact headers in the text.
+        # Extract the numeric part from the reference (e.g. "243" from "закон 243")
         article_number = re.search(r"\d+", article_ref)
         number_str = article_number.group(0) if article_number else ""
 
-        # Match patterns: "Моддаи 2", "Статья 2", "моддаи 2" etc.
-        # We look for the keyword + number in the chunk text.
+        # Detect if this is a law/punkt reference (numbered list item style)
+        is_list_item_ref = ref_lower.startswith(("закон ", "пункт "))
+
+        # Match patterns: "Моддаи 2", "Статья 2", "моддаи 2", "243." (list item) etc.
         boosted = []
         normal = []
 
         for i, doc_text in enumerate(docs):
             text_lower = (doc_text or "").lower()
-            # Check if the chunk contains the article reference
+            # Check if the chunk contains the article/law reference
             contains_ref = ref_lower in text_lower
             # Also check with flexible whitespace: "моддаи  2" or "статья\n2"
             if not contains_ref and number_str:
                 keyword = ref_lower.replace(number_str, "").strip()
                 pattern = re.escape(keyword) + r"\s+" + re.escape(number_str) + r"\b"
                 contains_ref = bool(re.search(pattern, text_lower))
+            # For numbered list items ("закон N", "пункт N"), also match
+            # the pattern "<number>." at the start of a line (bibliographic list format)
+            if not contains_ref and is_list_item_ref and number_str:
+                list_pattern = r"(?:^|\n)" + re.escape(number_str) + r"[.\s]"
+                contains_ref = bool(re.search(list_pattern, text_lower))
 
             entry = (docs[i], ids[i], metas[i], dists[i])
             if contains_ref:

@@ -107,5 +107,45 @@ class RagServiceHelpersTests(unittest.TestCase):
         self.assertAlmostEqual(boosted["distances"][0][0], 1.1 * 0.5)
 
 
+    def test_detect_article_reference_law_suffix(self):
+        """'243 законе' → 'закон 243'"""
+        ref = RAGService._detect_article_reference("что написано в 243 законе")
+        self.assertIsNotNone(ref)
+        self.assertEqual(ref, "закон 243")
+
+    def test_detect_article_reference_law_prefix(self):
+        """'закон 235' → 'закон 235'"""
+        ref = RAGService._detect_article_reference("что такое закон 235")
+        self.assertIsNotNone(ref)
+        self.assertEqual(ref, "закон 235")
+
+    def test_detect_article_reference_punkt(self):
+        """'пункт 10' → 'пункт 10'"""
+        ref = RAGService._detect_article_reference("что говорит пункт 10")
+        self.assertIsNotNone(ref)
+        self.assertEqual(ref, "пункт 10")
+
+    @patch("app.services.rag_service.RAGService._init_chroma")
+    def test_boost_list_item_by_line_number(self, mock_init):
+        """Chunk starting with '243.' should be boosted for ref 'закон 243'."""
+        rag = RAGService()
+        results = {
+            "documents": [[
+                "Общие положения закона.",
+                "243. О ратификации Соглашения между Правительством Российской Федерации и Европейским сообществом.",
+                "Другой текст без номера.",
+            ]],
+            "ids": [["1", "2", "3"]],
+            "metadatas": [[{"page": 51}, {"page": 51}, {"page": 52}]],
+            "distances": [[0.8, 1.3, 0.9]],
+        }
+        boosted = RAGService._boost_article_chunks(results, "закон 243")
+        # The chunk with "243." at start should be first
+        self.assertIn("243.", boosted["documents"][0][0])
+        # Its distance should be halved
+        self.assertAlmostEqual(boosted["distances"][0][0], 1.3 * 0.5)
+
+
 if __name__ == "__main__":
     unittest.main()
+

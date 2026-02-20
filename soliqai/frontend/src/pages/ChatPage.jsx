@@ -20,7 +20,7 @@ const QUICK_QUESTIONS = [
 
 const CHAT_HISTORY_STORAGE_PREFIX = 'soliqai.chat.history.';
 const MAX_PERSISTED_MESSAGES = 100;
-const PENDING_MESSAGE_TTL_MS = 120000;
+const PENDING_MESSAGE_TTL_MS = 600000; // 10 минут — LLM отвечает до 5+ мин
 const PENDING_PLACEHOLDER_TEXT = 'Думаю...';
 const INTERRUPTED_PENDING_TEXT = 'Запрос был прерван при смене раздела. Отправьте вопрос снова.';
 

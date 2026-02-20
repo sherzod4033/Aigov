@@ -191,3 +191,65 @@ PY"
 curl -fsS -X POST "http://195.209.219.237/api/v1/auth/login/access-token" -H "Content-Type: application/x-www-form-urlencoded" -d "username=admin&password=1TrW1fTsiFnW6qoF1Q"
 Проверил admin-доступ:
 curl -fsS "http://195.209.219.237/api/v1/settings/users" -H "Authorization: Bearer <TOKEN_ИЗ_ПРЕДЫДУЩЕЙ_КОМАНДЫ>"
+---
+18) Обязательные шаги после каждого git pull
+Обновить код:
+ssh -i "$KEY" "$HOST" "cd /home/ubuntu/Aigov && git pull origin main"
+Применить обновления схемы БД и таблиц:
+ssh -i "$KEY" "$HOST" "cd /home/ubuntu/Aigov/soliqai/backend && /home/ubuntu/Aigov/soliqai/backend/venv/bin/python -m app.init_db"
+Перезапустить backend и frontend:
+ssh -i "$KEY" "$HOST" "sudo systemctl restart soliqai-backend nginx && systemctl is-active soliqai-backend nginx"
+Быстрая проверка:
+curl -fsS http://195.209.219.237/health
+curl -fsS http://195.209.219.237/api/v1/openapi.json >/dev/null && echo api-ok
+---
+19) Если после обновления ошибка "column chunk_index does not exist"
+Сначала запустить штатную инициализацию:
+ssh -i "$KEY" "$HOST" "cd /home/ubuntu/Aigov/soliqai/backend && /home/ubuntu/Aigov/soliqai/backend/venv/bin/python -m app.init_db"
+Если ошибка не ушла, выполнить SQL вручную:
+ssh -i "$KEY" "$HOST" "sudo docker exec -i soliqai-postgres psql -U soliqai_user -d soliqai_db -c \"ALTER TABLE chunk ADD COLUMN IF NOT EXISTS chunk_index INTEGER;\""
+ssh -i "$KEY" "$HOST" "sudo docker exec -i soliqai-postgres psql -U soliqai_user -d soliqai_db -c \"WITH ranked AS (SELECT id, ROW_NUMBER() OVER (PARTITION BY doc_id ORDER BY id) - 1 AS rn FROM chunk) UPDATE chunk c SET chunk_index = ranked.rn FROM ranked WHERE c.id = ranked.id AND c.chunk_index IS NULL;\""
+После этого перезапуск:
+ssh -i "$KEY" "$HOST" "sudo systemctl restart soliqai-backend && systemctl is-active soliqai-backend"
+---
+20) Настройка таймаутов Nginx для больших PDF/DOCX
+Если загрузки падают по 504, в блоке location /api/ должны быть:
+proxy_connect_timeout 30s;
+proxy_send_timeout 600s;
+proxy_read_timeout 600s;
+send_timeout 600s;
+Проверка и перезагрузка:
+ssh -i "$KEY" "$HOST" "sudo nginx -t && sudo systemctl reload nginx"
+Проверка логов при ошибках загрузки:
+ssh -i "$KEY" "$HOST" "sudo journalctl -u soliqai-backend --since '20 minutes ago' --no-pager"
+ssh -i "$KEY" "$HOST" "python3 - <<'PY'
+from pathlib import Path
+for ln in Path('/var/log/nginx/access.log').read_text(errors='ignore').splitlines()[-30:]:
+    print(ln)
+PY"
+---
+21) Безопасность (обязательно)
+НЕЛЬЗЯ хранить приватный ключ (.pem) в репозитории.
+Если ключ попал в git:
+git rm --cached ads-195947-and-2545.pem
+echo "ads-195947-and-2545.pem" >> .gitignore
+git add .gitignore
+git commit -m "remove private key from git and ignore it"
+git push
+Сразу заменить ключ на сервере (rotate key pair).
+
+Пароль admin лучше сменить на постоянный и не хранить в заметках.
+Пример смены через API:
+1) Войти под admin и получить токен.
+2) Вызвать endpoint смены пароля (если включен в текущей версии), либо сменить через SQL/скрипт и перезапустить backend.
+---
+22) Быстрый чек-лист состояния прода
+Проверка сервисов:
+ssh -i "$KEY" "$HOST" "systemctl is-active docker ollama soliqai-backend nginx"
+Проверка контейнеров:
+ssh -i "$KEY" "$HOST" "sudo docker ps --format '{{.Names}}\t{{.Status}}\t{{.Ports}}'"
+Проверка API и UI:
+curl -fsS http://195.209.219.237/health
+curl -fsSI http://195.209.219.237
+Проверка последних ошибок backend:
+ssh -i "$KEY" "$HOST" "sudo journalctl -u soliqai-backend --no-pager -n 80"
