@@ -8,6 +8,7 @@ export const sourcesService = {
       'Content-Type': 'multipart/form-data',
     },
   }),
+  attachExisting: (payload) => api.post('/sources/attach', payload),
   delete: (id) => api.delete(`/sources/${id}`),
 };
 

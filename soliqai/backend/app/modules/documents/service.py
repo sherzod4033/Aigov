@@ -1,3 +1,4 @@
+import logging
 import os
 from typing import Any, Optional
 
@@ -11,8 +12,22 @@ from app.services.hybrid_chunker import HybridChunker
 from app.services.source_service import SourceService
 from app.modules.rag.service import RAGService
 
+logger = logging.getLogger(__name__)
+
 
 class DocumentModuleService:
+    @staticmethod
+    def _build_ingestion_chunker() -> HybridChunker:
+        # mxbai-embed-large exposes a 512-token context window via Ollama.
+        # Use a conservative char cap because BERT-style tokenization is denser
+        # than our coarse len()/3.6 estimate on structured text and tables.
+        return HybridChunker(
+            target_tokens=90,
+            max_tokens=180,
+            min_tokens=60,
+            max_chars=600,
+        )
+
     @staticmethod
     async def upload_document(
         session: AsyncSession, file: UploadFile, notebook_id: Optional[int] = None
@@ -29,7 +44,7 @@ class DocumentModuleService:
                 raise HTTPException(status_code=404, detail="Notebook not found")
 
         file_path = await SourceService.save_upload_file(file)
-        chunker = HybridChunker()
+        chunker = DocumentModuleService._build_ingestion_chunker()
         chunk_results = await run_in_threadpool(
             SourceService.extract_and_chunk, file_path, file_ext, chunker
         )
@@ -71,15 +86,15 @@ class DocumentModuleService:
             await session.flush()
             docs_text.append(chunk.text)
             ids.append(str(chunk.id))
-            metadatas.append(
-                {
-                    "doc_id": doc.id,
-                    "doc_name": doc.name,
-                    "page": chunk.page,
-                    "chunk_index": cr.chunk_index,
-                    "notebook_id": doc.notebook_id,
-                }
-            )
+            metadata = {
+                "doc_id": doc.id,
+                "doc_name": doc.name,
+                "page": chunk.page,
+                "chunk_index": cr.chunk_index,
+            }
+            if doc.notebook_id is not None:
+                metadata["notebook_id"] = doc.notebook_id
+            metadatas.append(metadata)
         await session.commit()
         try:
             rag_service.add_documents(docs_text, metadatas, ids)
@@ -87,10 +102,13 @@ class DocumentModuleService:
             doc.status = "error"
             session.add(doc)
             await session.commit()
-            raise HTTPException(
-                status_code=503,
-                detail="Document saved, but indexing failed: ChromaDB is unavailable.",
-            ) from exc
+            logger.warning(
+                "Document %s saved but indexing failed: %s",
+                doc.id,
+                exc,
+            )
+            await session.refresh(doc)
+            return doc
         return doc
 
     @staticmethod
@@ -105,6 +123,48 @@ class DocumentModuleService:
             statement = statement.where(Document.notebook_id == notebook_id)
         result = await session.exec(statement.offset(skip).limit(limit))
         return result.all()
+
+    @staticmethod
+    async def attach_documents_to_notebook(
+        session: AsyncSession, notebook_id: int, source_ids: list[int]
+    ) -> list[Document]:
+        notebook = await session.get(Notebook, notebook_id)
+        if not notebook:
+            raise HTTPException(status_code=404, detail="Notebook not found")
+
+        normalized_source_ids = list(dict.fromkeys(source_ids))
+        if not normalized_source_ids:
+            raise HTTPException(status_code=400, detail="No source ids provided")
+
+        result = await session.exec(
+            select(Document).where(Document.id.in_(normalized_source_ids))
+        )
+        documents = result.all()
+
+        if len(documents) != len(normalized_source_ids):
+            found_ids = {
+                document.id for document in documents if document.id is not None
+            }
+            missing_ids = [
+                source_id
+                for source_id in normalized_source_ids
+                if source_id not in found_ids
+            ]
+            raise HTTPException(
+                status_code=404,
+                detail=f"Documents not found: {', '.join(str(source_id) for source_id in missing_ids)}",
+            )
+
+        for document in documents:
+            document.notebook_id = notebook_id
+            session.add(document)
+
+        await session.commit()
+
+        for document in documents:
+            await session.refresh(document)
+
+        return documents
 
     @staticmethod
     async def get_document_chunks(session: AsyncSession, document_id: int):
@@ -160,7 +220,7 @@ class DocumentModuleService:
                 "total_chunks": 0,
             }
         rag_service = RAGService()
-        chunker = HybridChunker()
+        chunker = DocumentModuleService._build_ingestion_chunker()
         all_chunks_result = await session.exec(select(Chunk))
         all_chunks = all_chunks_result.all()
         old_chunk_ids = [str(c.id) for c in all_chunks if c.id is not None]
@@ -207,15 +267,15 @@ class DocumentModuleService:
                     await session.flush()
                     docs_text.append(chunk.text)
                     ids.append(str(chunk.id))
-                    metadatas.append(
-                        {
-                            "doc_id": doc.id,
-                            "doc_name": doc.name,
-                            "page": chunk.page,
-                            "chunk_index": cr.chunk_index,
-                            "notebook_id": doc.notebook_id,
-                        }
-                    )
+                    metadata = {
+                        "doc_id": doc.id,
+                        "doc_name": doc.name,
+                        "page": chunk.page,
+                        "chunk_index": cr.chunk_index,
+                    }
+                    if doc.notebook_id is not None:
+                        metadata["notebook_id"] = doc.notebook_id
+                    metadatas.append(metadata)
                 rag_service.add_documents(docs_text, metadatas, ids)
                 doc.status = "indexed"
                 session.add(doc)

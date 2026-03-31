@@ -148,6 +148,60 @@ class TestTokenBounds(unittest.TestCase):
         chunks = chunker.chunk(blocks)
         self.assertTrue(len(chunks) > 1, "Expected split for oversized paragraph")
 
+    def test_small_chunk_is_flushed_before_overflow(self):
+        """Current chunk must not exceed max_tokens when the next unit would overflow it."""
+        chunker = HybridChunker(
+            target_tokens=60,
+            max_tokens=100,
+            min_tokens=80,
+            overlap_tokens=0,
+        )
+        blocks = [
+            TextBlock(text="A" * 280, page=1, order=0, source="txt"),
+            TextBlock(text="B" * 120, page=1, order=1, source="txt"),
+        ]
+
+        chunks = chunker.chunk(blocks)
+
+        self.assertEqual(len(chunks), 2)
+        for chunk in chunks:
+            tokens = chunker._estimate_tokens(chunk.text)
+            self.assertLessEqual(tokens, chunker.max_tokens)
+
+    def test_hard_split_without_sentence_boundaries_respects_max_tokens(self):
+        """Character fallback splitting should still keep every chunk within max_tokens."""
+        chunker = HybridChunker(
+            target_tokens=60,
+            max_tokens=100,
+            min_tokens=20,
+            overlap_tokens=0,
+        )
+        blocks = [TextBlock(text="X" * 900, page=1, order=0, source="txt")]
+
+        chunks = chunker.chunk(blocks)
+
+        self.assertTrue(len(chunks) > 1)
+        for chunk in chunks:
+            tokens = chunker._estimate_tokens(chunk.text)
+            self.assertLessEqual(tokens, chunker.max_tokens)
+
+    def test_max_chars_limit_is_enforced(self):
+        """Chunks should also respect an explicit character ceiling."""
+        chunker = HybridChunker(
+            target_tokens=80,
+            max_tokens=300,
+            min_tokens=20,
+            overlap_tokens=0,
+            max_chars=120,
+        )
+        blocks = [TextBlock(text="Текст без точек " * 40, page=1, order=0, source="txt")]
+
+        chunks = chunker.chunk(blocks)
+
+        self.assertTrue(len(chunks) > 1)
+        for chunk in chunks:
+            self.assertLessEqual(len(chunk.text), 120)
+
 
 class TestListItems(unittest.TestCase):
     """Test that list items are handled properly."""

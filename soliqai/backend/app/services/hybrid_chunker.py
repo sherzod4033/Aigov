@@ -116,11 +116,13 @@ class HybridChunker:
         max_tokens: int = 800,
         min_tokens: int = 200,
         overlap_tokens: int = 0,
+        max_chars: int | None = None,
     ):
         self.target_tokens = target_tokens
         self.max_tokens = max_tokens
         self.min_tokens = min_tokens
         self.overlap_tokens = overlap_tokens
+        self.max_chars = max_chars
 
     # -- public API ----------------------------------------------------------
 
@@ -134,6 +136,7 @@ class HybridChunker:
         units = self._blocks_to_units(blocks)
         chunks = self._pack_units(units)
         chunks = self._postprocess(chunks)
+        chunks = self._enforce_max_tokens(chunks)
 
         if self.overlap_tokens > 0:
             chunks = self._apply_overlap(chunks)
@@ -149,6 +152,17 @@ class HybridChunker:
     def _estimate_tokens(self, text: str) -> int:
         """Approximate token count from character length."""
         return max(1, int(len(text) / self.CHARS_PER_TOKEN))
+
+    def _max_chunk_chars(self) -> int:
+        token_based_limit = int(self.max_tokens * self.CHARS_PER_TOKEN)
+        if self.max_chars is None:
+            return token_based_limit
+        return min(token_based_limit, self.max_chars)
+
+    def _exceeds_limits(self, text: str) -> bool:
+        if self._estimate_tokens(text) > self.max_tokens:
+            return True
+        return self.max_chars is not None and len(text) > self.max_chars
 
     # -- normalization -------------------------------------------------------
 
@@ -390,9 +404,11 @@ class HybridChunker:
                     current_page_end = unit.page_end
                     current_section_path = unit.section_path
                 else:
-                    # Current chunk too small, but adding unit would overflow.
-                    # Try splitting the unit.
-                    pass  # Handled below after adding
+                    # Prefer a small chunk over exceeding the model's context limit.
+                    _flush()
+                    current_page_start = unit.page_start
+                    current_page_end = unit.page_end
+                    current_section_path = unit.section_path
 
             # Handle oversized units (bigger than max_tokens on their own)
             if unit_tokens > self.max_tokens:
@@ -444,9 +460,9 @@ class HybridChunker:
     def _split_oversized(self, text: str) -> List[str]:
         """Split oversized text by sentences, then hard-split if needed."""
         sentences = _SENTENCE_SPLIT.split(text)
-        if len(sentences) <= 1 and self._estimate_tokens(text) > self.max_tokens:
+        if len(sentences) <= 1 and self._exceeds_limits(text):
             # Hard split by characters
-            max_chars = int(self.max_tokens * self.CHARS_PER_TOKEN)
+            max_chars = self._max_chunk_chars()
             return [text[i:i + max_chars] for i in range(0, len(text), max_chars)]
 
         result: List[str] = []
@@ -456,12 +472,12 @@ class HybridChunker:
             if not sentence:
                 continue
             candidate = f"{current} {sentence}".strip() if current else sentence
-            if self._estimate_tokens(candidate) > self.max_tokens:
+            if self._exceeds_limits(candidate):
                 if current:
                     result.append(current)
-                if self._estimate_tokens(sentence) > self.max_tokens:
+                if self._exceeds_limits(sentence):
                     # Hard split this sentence
-                    max_chars = int(self.max_tokens * self.CHARS_PER_TOKEN)
+                    max_chars = self._max_chunk_chars()
                     result.extend(
                         sentence[i:i + max_chars]
                         for i in range(0, len(sentence), max_chars)
@@ -513,6 +529,31 @@ class HybridChunker:
                 merged.append(chunk)
 
         return merged
+
+    def _enforce_max_tokens(self, chunks: List[ChunkResult]) -> List[ChunkResult]:
+        """Split any chunk that still exceeds max_tokens after merging."""
+        bounded: List[ChunkResult] = []
+
+        for chunk in chunks:
+            if not self._exceeds_limits(chunk.text):
+                bounded.append(chunk)
+                continue
+
+            for piece in self._split_oversized(chunk.text):
+                text = piece.strip()
+                if not text:
+                    continue
+                bounded.append(
+                    ChunkResult(
+                        chunk_index=0,
+                        text=text,
+                        page_start=chunk.page_start,
+                        page_end=chunk.page_end,
+                        section_path=list(chunk.section_path),
+                    )
+                )
+
+        return bounded
 
     def _apply_overlap(self, chunks: List[ChunkResult]) -> List[ChunkResult]:
         """Prepend tail of previous chunk to each chunk for context continuity."""

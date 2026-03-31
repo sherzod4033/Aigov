@@ -1,12 +1,14 @@
 import unittest
 import os
 import tempfile
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from types import SimpleNamespace
 
 from app.modules.chat.service import is_no_data_answer as _is_no_data_answer
 from app.modules.chat.service import select_relevant_chunks as _select_relevant_chunks
+from app.modules.documents.service import DocumentModuleService
 from app.services.document_service import DocumentService
+from app.services.hybrid_chunker import ChunkResult
 from app.services.rag_service import RAGService
 
 
@@ -177,6 +179,51 @@ class RagServiceHelpersTests(unittest.TestCase):
         self.assertIn("243.", boosted["documents"][0][0])
         # Its distance should be halved
         self.assertAlmostEqual(boosted["distances"][0][0], 1.3 * 0.5)
+
+
+class DocumentModuleServiceTests(unittest.IsolatedAsyncioTestCase):
+    @patch("app.modules.documents.service.RAGService")
+    @patch("app.modules.documents.service.run_in_threadpool", new_callable=AsyncMock)
+    @patch("app.modules.documents.service.SourceService.save_upload_file", new_callable=AsyncMock)
+    @patch("app.modules.documents.service.SourceService.validate_upload_file")
+    async def test_upload_document_marks_saved_doc_as_error_when_indexing_fails(
+        self,
+        mock_validate_upload_file,
+        mock_save_upload_file,
+        mock_run_in_threadpool,
+        mock_rag_service,
+    ):
+        mock_validate_upload_file.return_value = ".txt"
+        mock_save_upload_file.return_value = "/tmp/dates.txt"
+        mock_run_in_threadpool.return_value = [
+            ChunkResult(
+                chunk_index=0,
+                text="Первый тестовый фрагмент",
+                page_start=1,
+                page_end=1,
+            )
+        ]
+
+        rag_instance = mock_rag_service.return_value
+        rag_instance.add_documents.side_effect = RuntimeError("Ollama unavailable")
+
+        session = SimpleNamespace(
+            get=AsyncMock(return_value=None),
+            add=MagicMock(),
+            commit=AsyncMock(),
+            refresh=AsyncMock(side_effect=lambda obj: setattr(obj, "id", getattr(obj, "id", None) or 101)),
+            flush=AsyncMock(side_effect=lambda: None),
+        )
+
+        file_obj = SimpleNamespace(filename="dates.txt", content_type="text/plain")
+
+        document = await DocumentModuleService.upload_document(session, file_obj)
+
+        self.assertEqual(document.status, "error")
+        self.assertEqual(document.name, "dates.txt")
+        self.assertEqual(document.id, 101)
+        self.assertEqual(session.commit.await_count, 3)
+        rag_instance.add_documents.assert_called_once()
 
 
 if __name__ == "__main__":

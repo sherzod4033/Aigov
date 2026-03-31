@@ -209,7 +209,9 @@ const AdminDocumentsPage = ({ notebookId }) => {
         const failed = results.filter((r) => !r.success);
 
         if (failed.length > 0) {
-            setUploadError(`Не удалось загрузить: ${failed.map((f) => f.name).join(', ')}`);
+            setUploadError(
+                `Не удалось загрузить: ${failed.map((f) => `${f.name}${f.error ? ` (${f.error})` : ''}`).join(', ')}`
+            );
         }
 
         setDraggedFiles([]);

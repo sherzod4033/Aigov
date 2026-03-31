@@ -1,4 +1,5 @@
 from pathlib import Path
+import logging
 import re
 
 import chromadb
@@ -8,17 +9,60 @@ from app.modules.rag.constants import DEFAULT_EMBEDDING_MODEL
 from app.modules.rag.model_manager import ModelManager
 from app.shared.settings.config import settings
 
+logger = logging.getLogger(__name__)
+
 
 class OllamaEmbeddingFunction:
     def __init__(self, manager: ModelManager, model: str) -> None:
         self._manager = manager
         self._model = model
 
+    @staticmethod
+    def _normalize_input(
+        input_data: str | list[str] | tuple[str, ...] | object,
+    ) -> list[str]:
+        if isinstance(input_data, str):
+            return [input_data]
+
+        if isinstance(input_data, (list, tuple)):
+            normalized: list[str] = []
+            for item in input_data:
+                if isinstance(item, str):
+                    normalized.append(item)
+                elif isinstance(item, (list, tuple)):
+                    normalized.extend(
+                        str(nested) for nested in item if nested is not None
+                    )
+                elif item is not None:
+                    normalized.append(str(item))
+            return normalized
+
+        if input_data is None:
+            return []
+
+        return [str(input_data)]
+
     def __call__(self, input: list[str]) -> list[list[float]]:
-        return self._manager.embed(input, model=self._model)
+        return self.embed_documents(input)
+
+    def embed_documents(self, input: list[str]) -> list[list[float]]:
+        normalized = self._normalize_input(input)
+        return self._manager.embed(normalized, model=self._model)
+
+    def embed_query(self, input: str | list[str]) -> list[list[float]]:
+        normalized = self._normalize_input(input)
+        if not normalized:
+            return []
+        return self._manager.embed([normalized[0]], model=self._model)
+
+    @staticmethod
+    def name() -> str:
+        return "ollama"
 
 
 class ChromaGateway:
+    ADD_BATCH_SIZE = 8
+
     def __init__(self) -> None:
         from app.shared.settings.runtime_settings import RuntimeSettingsService
 
@@ -89,11 +133,53 @@ class ChromaGateway:
                 status_code=503,
                 cause=self.chroma_error,
             )
+        if not documents:
+            return
+        if not (len(documents) == len(metadatas) == len(ids)):
+            raise ValueError("documents, metadatas and ids must have the same length")
+
+        for start in range(0, len(documents), self.ADD_BATCH_SIZE):
+            end = start + self.ADD_BATCH_SIZE
+            self._add_documents_batch(
+                documents[start:end],
+                metadatas[start:end],
+                ids[start:end],
+            )
+
+    def _add_documents_batch(
+        self, documents: list[str], metadatas: list[dict], ids: list[str]
+    ) -> None:
         try:
             self.collection.add(documents=documents, metadatas=metadatas, ids=ids)
         except ExternalServiceError:
             raise
         except Exception as exc:
+            message = str(exc).lower()
+            if (
+                "input length exceeds the context length" in message
+            ):
+                logger.warning(
+                    "Embedding batch exceeded context length: batch_size=%s max_chars=%s model=%s",
+                    len(documents),
+                    max((len(doc) for doc in documents), default=0),
+                    self.embedding_model,
+                )
+            if (
+                "input length exceeds the context length" in message
+                and len(documents) > 1
+            ):
+                midpoint = max(1, len(documents) // 2)
+                self._add_documents_batch(
+                    documents[:midpoint],
+                    metadatas[:midpoint],
+                    ids[:midpoint],
+                )
+                self._add_documents_batch(
+                    documents[midpoint:],
+                    metadatas[midpoint:],
+                    ids[midpoint:],
+                )
+                return
             raise ExternalServiceError(
                 "ChromaDB request failed",
                 service="ChromaDB",
