@@ -10,9 +10,10 @@ from pydantic import BaseModel
 
 from app.api import deps
 from app.core.database import get_session
-from app.models.models import Log, User
+from app.shared.models import Log, User
 
 router = APIRouter()
+
 
 class RatingUpdate(BaseModel):
     rating: Literal["up", "down"]
@@ -25,13 +26,17 @@ async def read_logs(
     start_date: date | None = None,
     end_date: date | None = None,
     current_user: User = Depends(deps.get_current_active_superuser),
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     statement = select(Log)
     if start_date:
-        statement = statement.where(Log.created_at >= datetime.combine(start_date, time.min))
+        statement = statement.where(
+            Log.created_at >= datetime.combine(start_date, time.min)
+        )
     if end_date:
-        statement = statement.where(Log.created_at <= datetime.combine(end_date, time.max))
+        statement = statement.where(
+            Log.created_at <= datetime.combine(end_date, time.max)
+        )
     statement = statement.order_by(desc(Log.created_at)).offset(skip).limit(limit)
 
     result = await session.exec(statement)
@@ -43,12 +48,12 @@ async def rate_log(
     log_id: int,
     rating_in: RatingUpdate,
     current_user: User = Depends(deps.get_current_user),
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
 ) -> Any:
     log = await session.get(Log, log_id)
     if not log:
         raise HTTPException(status_code=404, detail="Log not found")
-    
+
     log.rating = rating_in.rating
     session.add(log)
     await session.commit()
@@ -61,14 +66,18 @@ async def export_logs(
     start_date: date | None = None,
     end_date: date | None = None,
     current_user: User = Depends(deps.get_current_active_superuser),
-    session: AsyncSession = Depends(get_session)
+    session: AsyncSession = Depends(get_session),
 ) -> StreamingResponse:
     """Export logs to CSV file."""
     statement = select(Log)
     if start_date:
-        statement = statement.where(Log.created_at >= datetime.combine(start_date, time.min))
+        statement = statement.where(
+            Log.created_at >= datetime.combine(start_date, time.min)
+        )
     if end_date:
-        statement = statement.where(Log.created_at <= datetime.combine(end_date, time.max))
+        statement = statement.where(
+            Log.created_at <= datetime.combine(end_date, time.max)
+        )
     statement = statement.order_by(desc(Log.created_at))
 
     result = await session.exec(statement)
@@ -77,35 +86,43 @@ async def export_logs(
     # Create CSV in memory
     output = io.StringIO()
     writer = csv.writer(output, quoting=csv.QUOTE_ALL)
-    
+
     # Write header
-    writer.writerow([
-        "ID", "Вопрос", "Ответ", "Источники", "Время (мс)", 
-        "Отзыв", "ID пользователя", "Создано"
-    ])
-    
+    writer.writerow(
+        [
+            "ID",
+            "Вопрос",
+            "Ответ",
+            "Источники",
+            "Время (мс)",
+            "Отзыв",
+            "ID пользователя",
+            "Создано",
+        ]
+    )
+
     # Write data
     for log in logs:
-        writer.writerow([
-            log.id,
-            log.question,
-            log.answer,
-            log.sources or "",
-            log.time_ms,
-            log.rating or "",
-            log.user_id or "",
-            log.created_at.isoformat() if log.created_at else ""
-        ])
-    
+        writer.writerow(
+            [
+                log.id,
+                log.question,
+                log.answer,
+                log.sources or "",
+                log.time_ms,
+                log.rating or "",
+                log.user_id or "",
+                log.created_at.isoformat() if log.created_at else "",
+            ]
+        )
+
     output.seek(0)
-    
+
     # Generate filename with current date
     filename = f"logs_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-    
+
     return StreamingResponse(
         iter([output.getvalue()]),
         media_type="text/csv; charset=utf-8",
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"'
-        }
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

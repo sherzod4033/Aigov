@@ -10,7 +10,7 @@ from app.core import security
 from app.core.config import settings
 from app.core.rate_limit import auth_limiter, check_rate_limit
 from app.api import deps
-from app.models.models import User
+from app.shared.models import User
 
 router = APIRouter()
 
@@ -33,7 +33,7 @@ class RegisterResponse(BaseModel):
 async def login_access_token(
     session: AsyncSession = Depends(deps.get_session),
     form_data: OAuth2PasswordRequestForm = Depends(),
-    request: Request = None
+    request: Request = None,
 ) -> Any:
     """
     OAuth2 compatible token login, get an access token for future requests.
@@ -42,13 +42,13 @@ async def login_access_token(
     # Check rate limit
     if request:
         await check_rate_limit(request, auth_limiter)
-    
+
     result = await session.exec(select(User).where(User.username == form_data.username))
     user = result.first()
-    
+
     if not user or not security.verify_password(form_data.password, user.password_hash):
         raise HTTPException(status_code=400, detail="Incorrect email or password")
-    
+
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = security.create_access_token(
         data={"sub": user.username}, expires_delta=access_token_expires
@@ -68,14 +68,16 @@ async def login_alias(
     """
     Alias for /login/access-token to match clients expecting /auth/login.
     """
-    return await login_access_token(session=session, form_data=form_data, request=request)
+    return await login_access_token(
+        session=session, form_data=form_data, request=request
+    )
 
 
 @router.post("/register", response_model=RegisterResponse)
 async def register_user(
     session: AsyncSession = Depends(deps.get_session),
     payload: RegisterRequest = None,
-    request: Request = None
+    request: Request = None,
 ) -> Any:
     """
     Register a new user.
@@ -84,7 +86,7 @@ async def register_user(
     if request:
         # Check rate limit
         await check_rate_limit(request, auth_limiter)
-    
+
     result = await session.exec(select(User).where(User.username == payload.username))
     user = result.first()
     if user:

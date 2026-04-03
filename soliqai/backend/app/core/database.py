@@ -35,6 +35,33 @@ async def init_db():
                 )
             )
 
+            await conn.execute(
+                text(
+                    """
+                    ALTER TABLE IF EXISTS document
+                    ADD COLUMN IF NOT EXISTS notebook_id INTEGER REFERENCES notebook(id)
+                    """
+                )
+            )
+
+            await conn.execute(
+                text(
+                    """
+                    ALTER TABLE IF EXISTS log
+                    ADD COLUMN IF NOT EXISTS notebook_id INTEGER REFERENCES notebook(id)
+                    """
+                )
+            )
+
+            await conn.execute(
+                text(
+                    """
+                    ALTER TABLE IF EXISTS log
+                    ADD COLUMN IF NOT EXISTS domain_profile VARCHAR(50)
+                    """
+                )
+            )
+
             # Fill missing chunk indexes for old rows so ordering-dependent
             # features continue working after upgrades.
             await conn.execute(
@@ -50,6 +77,77 @@ async def init_db():
                     SET chunk_index = ranked.rn
                     FROM ranked
                     WHERE c.id = ranked.id AND c.chunk_index IS NULL
+                    """
+                )
+            )
+
+            await conn.execute(
+                text(
+                    """
+                    INSERT INTO notebook (name, description, domain_profile, owner_id, created_at)
+                    SELECT 'Imported Tax Notebook', 'Migrated default notebook for existing sources', 'tax', NULL, NOW()
+                    WHERE NOT EXISTS (SELECT 1 FROM notebook)
+                    """
+                )
+            )
+
+            await conn.execute(
+                text(
+                    """
+                    WITH default_notebook AS (
+                        SELECT id FROM notebook ORDER BY id LIMIT 1
+                    )
+                    UPDATE document
+                    SET notebook_id = (SELECT id FROM default_notebook)
+                    WHERE notebook_id IS NULL
+                    """
+                )
+            )
+
+            await conn.execute(
+                text(
+                    """
+                    UPDATE log
+                    SET domain_profile = COALESCE(domain_profile, 'tax')
+                    WHERE domain_profile IS NULL
+                    """
+                )
+            )
+
+            await conn.execute(
+                text(
+                    """
+                    ALTER TABLE IF EXISTS note
+                    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITHOUT TIME ZONE
+                    """
+                )
+            )
+
+            await conn.execute(
+                text(
+                    """
+                    UPDATE note
+                    SET updated_at = COALESCE(updated_at, created_at, NOW())
+                    WHERE updated_at IS NULL
+                    """
+                )
+            )
+
+            await conn.execute(
+                text(
+                    """
+                    ALTER TABLE IF EXISTS insight
+                    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITHOUT TIME ZONE
+                    """
+                )
+            )
+
+            await conn.execute(
+                text(
+                    """
+                    UPDATE insight
+                    SET updated_at = COALESCE(updated_at, created_at, NOW())
+                    WHERE updated_at IS NULL
                     """
                 )
             )

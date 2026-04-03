@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { logsService } from '../services/services';
+import { logsService } from '../services/logsService';
 import {
     Download,
     Filter,

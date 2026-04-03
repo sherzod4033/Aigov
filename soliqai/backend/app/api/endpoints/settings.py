@@ -7,22 +7,34 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.api import deps
+from app.domain_profiles import list_domain_profiles
 from app.core.database import get_session
-from app.models.models import User
-from app.services.runtime_settings_service import RuntimeSettingsService
+from app.shared.models import User
+from app.shared.settings import RuntimeSettingsService
 
 router = APIRouter()
 
 
 class RuntimeSettingsResponse(BaseModel):
     model: str
+    chat_model: str
+    embedding_model: str
     top_k: int = Field(ge=1, le=20)
+    default_domain_profile: str
     available_models: list[str]
+    available_chat_models: list[str]
+    available_embedding_models: list[str]
+    ollama_available: bool
+    ollama_error: str | None = None
+    available_domain_profiles: list[str]
 
 
 class RuntimeSettingsUpdate(BaseModel):
     model: str | None = None
+    chat_model: str | None = None
+    embedding_model: str | None = None
     top_k: int | None = Field(default=None, ge=1, le=20)
+    default_domain_profile: str | None = None
 
 
 class UserRoleItem(BaseModel):
@@ -41,10 +53,19 @@ async def get_runtime_settings(
     current_user: User = Depends(deps.get_current_active_superuser),
 ) -> Any:
     runtime_settings = RuntimeSettingsService.get_settings()
+    model_catalog = RuntimeSettingsService.model_catalog()
     return RuntimeSettingsResponse(
         model=runtime_settings["model"],
+        chat_model=runtime_settings["chat_model"],
+        embedding_model=runtime_settings["embedding_model"],
         top_k=runtime_settings["top_k"],
-        available_models=RuntimeSettingsService.available_models(),
+        default_domain_profile=runtime_settings["default_domain_profile"],
+        available_models=model_catalog["available_models"],
+        available_chat_models=model_catalog["available_chat_models"],
+        available_embedding_models=model_catalog["available_embedding_models"],
+        ollama_available=model_catalog["ollama_available"],
+        ollama_error=model_catalog["ollama_error"],
+        available_domain_profiles=list_domain_profiles(),
     )
 
 
@@ -54,13 +75,24 @@ async def update_runtime_settings(
     current_user: User = Depends(deps.get_current_active_superuser),
 ) -> Any:
     try:
-        updated = RuntimeSettingsService.update_settings(payload.model_dump(exclude_none=True))
+        updated = RuntimeSettingsService.update_settings(
+            payload.model_dump(exclude_none=True)
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    model_catalog = RuntimeSettingsService.model_catalog()
     return RuntimeSettingsResponse(
         model=updated["model"],
+        chat_model=updated["chat_model"],
+        embedding_model=updated["embedding_model"],
         top_k=updated["top_k"],
-        available_models=RuntimeSettingsService.available_models(),
+        default_domain_profile=updated["default_domain_profile"],
+        available_models=model_catalog["available_models"],
+        available_chat_models=model_catalog["available_chat_models"],
+        available_embedding_models=model_catalog["available_embedding_models"],
+        ollama_available=model_catalog["ollama_available"],
+        ollama_error=model_catalog["ollama_error"],
+        available_domain_profiles=list_domain_profiles(),
     )
 
 
@@ -99,7 +131,9 @@ async def update_user_role(
         admins_result = await session.exec(select(User).where(User.role == "admin"))
         admins = admins_result.all()
         if len(admins) <= 1:
-            raise HTTPException(status_code=400, detail="At least one admin must remain in the system")
+            raise HTTPException(
+                status_code=400, detail="At least one admin must remain in the system"
+            )
 
     user.role = payload.role
     session.add(user)

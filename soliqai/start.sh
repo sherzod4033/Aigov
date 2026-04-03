@@ -7,6 +7,9 @@ echo
 
 POSTGRES_HOST="${POSTGRES_SERVER:-localhost}"
 POSTGRES_PORT="${POSTGRES_PORT:-5432}"
+OLLAMA_API_BASE="${OLLAMA_API_BASE:-http://localhost:11434}"
+OLLAMA_MODEL_CHAT="${OLLAMA_MODEL_CHAT:-gemma3n:e4b}"
+OLLAMA_MODEL_EMBEDDING="${OLLAMA_MODEL_EMBEDDING:-nomic-embed-text}"
 
 check_postgres() {
     if command -v pg_isready >/dev/null 2>&1; then
@@ -73,11 +76,29 @@ fi
 echo "✅ PostgreSQL is running ($POSTGRES_HOST:$POSTGRES_PORT)"
 
 # Check if ollama is running
-if ! curl -fsS http://localhost:11434/api/tags >/dev/null 2>&1; then
+if ! curl -fsS "$OLLAMA_API_BASE/api/tags" >/dev/null 2>&1; then
     echo "⚠️  Ollama is not running. Please start it:"
     echo "   ollama serve"
 else
-    echo "✅ Ollama is running (http://localhost:11434)"
+    echo "✅ Ollama is running ($OLLAMA_API_BASE)"
+
+    if command -v ollama >/dev/null 2>&1; then
+        ensure_ollama_model() {
+            local model="$1"
+
+            if [ -z "$model" ]; then
+                return 0
+            fi
+
+            if ! OLLAMA_HOST="$OLLAMA_API_BASE" ollama list | grep -Fq "$model"; then
+                echo "⬇️  Pulling Ollama model: $model"
+                OLLAMA_HOST="$OLLAMA_API_BASE" ollama pull "$model"
+            fi
+        }
+
+        ensure_ollama_model "$OLLAMA_MODEL_CHAT"
+        ensure_ollama_model "$OLLAMA_MODEL_EMBEDDING"
+    fi
 fi
 
 # Start backend

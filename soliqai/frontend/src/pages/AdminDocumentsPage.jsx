@@ -26,6 +26,8 @@ const ALLOWED_MIME_TYPES = new Set([
     'application/zip',
 ]);
 
+const normalizeMimeType = (mimeType) => String(mimeType || '').split(';', 1)[0].trim().toLowerCase();
+
 const STATUS_ORDER = ['all', 'ready', 'indexing', 'error'];
 
 const STATUS_META = {
@@ -45,6 +47,8 @@ const STATUS_META = {
         dotClass: 'bg-red-500',
     },
 };
+
+const ACTIVE_NOTEBOOK_STORAGE_KEY = 'knowledgeai.activeNotebookId';
 
 const resolveStatus = (status) => {
     const normalized = String(status || '').toLowerCase();
@@ -80,7 +84,16 @@ const getLanguageTag = (language) => {
     return { text: 'RU', className: 'bg-blue-100 text-blue-700' };
 };
 
-const AdminDocumentsPage = () => {
+const resolveNotebookId = (notebookId) => {
+    if (notebookId !== undefined) {
+        return notebookId == null ? null : Number(notebookId);
+    }
+
+    const storedValue = localStorage.getItem(ACTIVE_NOTEBOOK_STORAGE_KEY);
+    return storedValue ? Number(storedValue) : null;
+};
+
+const AdminDocumentsPage = ({ notebookId }) => {
     const [documents, setDocuments] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isUploading, setIsUploading] = useState(false);
@@ -109,13 +122,14 @@ const AdminDocumentsPage = () => {
     } = useForm();
 
     const selectedFile = watch('file')?.[0];
+    const effectiveNotebookId = resolveNotebookId(notebookId);
 
     const fetchDocuments = async () => {
         try {
-            const response = await api.get('/documents/');
+            const response = await api.get(`/sources/${effectiveNotebookId ? `?notebook_id=${effectiveNotebookId}` : ''}`);
             setDocuments(response.data || []);
         } catch (error) {
-            console.error('Failed to fetch documents:', error);
+            console.error('Failed to fetch sources:', error);
         } finally {
             setIsLoading(false);
         }
@@ -124,7 +138,10 @@ const AdminDocumentsPage = () => {
     const validateFile = useCallback((file) => {
         const ext = file.name.split('.').pop()?.toLowerCase() || '';
         const hasAllowedExt = ALLOWED_EXTENSIONS.includes(ext);
-        const hasAllowedMime = ALLOWED_MIME_TYPES.has((file.type || '').toLowerCase());
+        if (!hasAllowedExt) return false;
+        if (ext === 'txt') return true;
+
+        const hasAllowedMime = ALLOWED_MIME_TYPES.has(normalizeMimeType(file.type));
         return hasAllowedExt && hasAllowedMime;
     }, []);
 
@@ -174,9 +191,12 @@ const AdminDocumentsPage = () => {
         const uploadPromises = files.map(async (file) => {
             const formData = new FormData();
             formData.append('file', file);
+            if (effectiveNotebookId) {
+                formData.append('notebook_id', String(effectiveNotebookId));
+            }
 
             try {
-                await api.post('/documents/upload', formData, {
+                await api.post('/sources/upload', formData, {
                     headers: { 'Content-Type': 'multipart/form-data' },
                 });
                 return { success: true, name: file.name };
@@ -196,7 +216,7 @@ const AdminDocumentsPage = () => {
         reset();
         await fetchDocuments();
         setIsUploading(false);
-    }, [reset]);
+    }, [effectiveNotebookId, reset]);
 
     const fetchChunks = useCallback(async (docId, docName) => {
         setChunksModal({
@@ -209,7 +229,7 @@ const AdminDocumentsPage = () => {
         });
 
         try {
-            const response = await api.get(`/documents/${docId}/chunks`);
+            const response = await api.get(`/sources/${docId}/chunks`);
             setChunksModal((prev) => ({
                 ...prev,
                 chunks: response.data || [],
@@ -238,7 +258,7 @@ const AdminDocumentsPage = () => {
 
     useEffect(() => {
         fetchDocuments();
-    }, []);
+    }, [effectiveNotebookId]);
 
     const stats = useMemo(() => {
         const counts = {
@@ -271,11 +291,7 @@ const AdminDocumentsPage = () => {
         const selected = data.file?.[0];
         if (!selected) return;
 
-        const ext = selected.name.split('.').pop()?.toLowerCase() || '';
-        const hasAllowedExt = ALLOWED_EXTENSIONS.includes(ext);
-        const hasAllowedMime = ALLOWED_MIME_TYPES.has((selected.type || '').toLowerCase());
-
-        if (!hasAllowedExt || !hasAllowedMime) {
+        if (!validateFile(selected)) {
             setUploadError('Разрешенные форматы: PDF, DOCX, TXT. Пожалуйста, выберите допустимый файл.');
             return;
         }
@@ -285,30 +301,33 @@ const AdminDocumentsPage = () => {
 
         const formData = new FormData();
         formData.append('file', selected);
+        if (effectiveNotebookId) {
+            formData.append('notebook_id', String(effectiveNotebookId));
+        }
 
         try {
-            await api.post('/documents/upload', formData, {
+            await api.post('/sources/upload', formData, {
                 headers: { 'Content-Type': 'multipart/form-data' },
             });
             reset();
             await fetchDocuments();
         } catch (error) {
             console.error('Upload failed:', error);
-            setUploadError(error.response?.data?.detail || 'Не удалось загрузить документ');
+            setUploadError(error.response?.data?.detail || 'Не удалось загрузить source');
         } finally {
             setIsUploading(false);
         }
     };
 
     const onDelete = async (id) => {
-        if (!window.confirm('Вы уверены, что хотите удалить этот документ?')) return;
+        if (!window.confirm('Вы уверены, что хотите удалить этот source?')) return;
 
         try {
-            await api.delete(`/documents/${id}`);
+            await api.delete(`/sources/${id}`);
             setDocuments((prev) => prev.filter((doc) => doc.id !== id));
         } catch (error) {
             console.error('Delete failed:', error);
-            alert('Не удалось удалить документ');
+            alert('Не удалось удалить source');
         }
     };
 
@@ -437,14 +456,14 @@ const AdminDocumentsPage = () => {
                                     <td colSpan="6" className="px-5 py-12 text-center text-slate-500">
                                         <div className="inline-flex items-center gap-2">
                                             <Loader2 className="h-5 w-5 animate-spin" />
-                                            Загрузка документов...
+                                            Загрузка sources...
                                         </div>
                                     </td>
                                 </tr>
                             ) : filteredDocuments.length === 0 ? (
                                 <tr>
                                     <td colSpan="6" className="px-5 py-12 text-center text-slate-500">
-                                        Документы не найдены.
+                                        Sources не найдены.
                                     </td>
                                 </tr>
                             ) : (
@@ -529,7 +548,7 @@ const AdminDocumentsPage = () => {
                     <div className="max-h-[90vh] w-full max-w-4xl overflow-hidden rounded-2xl bg-white shadow-xl">
                         <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
                             <div>
-                                <h3 className="text-lg font-bold text-slate-800">Фрагменты документа</h3>
+                                <h3 className="text-lg font-bold text-slate-800">Фрагменты source</h3>
                                 <p className="text-sm text-slate-500">{chunksModal.docName}</p>
                             </div>
                             <button
@@ -553,7 +572,7 @@ const AdminDocumentsPage = () => {
                                 </div>
                             ) : chunksModal.chunks.length === 0 ? (
                                 <div className="rounded-lg bg-slate-50 p-8 text-center text-slate-500">
-                                    Фрагменты не найдены. Возможно, документ еще индексируется.
+                                    Фрагменты не найдены. Возможно, source еще индексируется.
                                 </div>
                             ) : (
                                 <div className="space-y-4">

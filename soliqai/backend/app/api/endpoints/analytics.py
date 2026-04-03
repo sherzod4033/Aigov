@@ -8,7 +8,7 @@ from sqlmodel import select
 
 from app.api import deps
 from app.core.database import get_session
-from app.models.models import Log, User
+from app.shared.models import Log, User
 
 router = APIRouter()
 
@@ -50,13 +50,17 @@ async def get_analytics(
 
     no_data_ratio = (no_data_count / total_requests) if total_requests else 0.0
     avg_response_time_ms = (
-        sum((item.time_ms or 0) for item in logs) / total_requests if total_requests else 0.0
+        sum((item.time_ms or 0) for item in logs) / total_requests
+        if total_requests
+        else 0.0
     )
 
     positive_feedback = sum(1 for item in logs if item.rating == "up")
     negative_feedback = sum(1 for item in logs if item.rating == "down")
 
-    question_counter = Counter((item.question or "").strip() for item in logs if item.question)
+    question_counter = Counter(
+        (item.question or "").strip() for item in logs if item.question
+    )
     top_questions = [
         TopQuestion(question=question, count=count)
         for question, count in question_counter.most_common(5)

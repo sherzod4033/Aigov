@@ -11,7 +11,6 @@
 | Векторная БД | ChromaDB |
 | База данных | PostgreSQL + asyncpg |
 | Локальная ИИ | Gemma 3n (Ollama) |
-| Улучшение | OpenAI GPT-4.1-mini |
 | OCR | Tesseract |
 
 ## 🚀 Быстрый старт
@@ -154,7 +153,9 @@ soliqai/
 
 | Переменная | Описание | По умолчанию |
 |------------|----------|--------------|
-| `OPENAI_API_KEY` | Ключ OpenAI API | - |
+| `OLLAMA_API_BASE` | Базовый URL Ollama API | `http://localhost:11434` |
+| `OLLAMA_MODEL_CHAT` | Модель Ollama для чата | `gemma3n:e4b` |
+| `OLLAMA_MODEL_EMBEDDING` | Модель Ollama для эмбеддингов | `nomic-embed-text` |
 | `SECRET_KEY` | JWT секретный ключ | Автогенерация |
 | `POSTGRES_*` | Настройки PostgreSQL | localhost |
 | `CORS_ORIGINS` | Разрешенные origins | * |

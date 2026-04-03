@@ -5,16 +5,18 @@ from jose import jwt, JWTError
 from pydantic import ValidationError
 from sqlmodel.ext.asyncio.session import AsyncSession
 from app.core import security
-from app.core.config import settings
+from app.shared.settings import settings
 from app.core.database import get_session
-from app.models.models import User
+from app.shared.models import User
 from sqlmodel import select
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/login/access-token")
+oauth2_scheme = OAuth2PasswordBearer(
+    tokenUrl=f"{settings.API_V1_STR}/auth/login/access-token"
+)
+
 
 async def get_current_user(
-    session: AsyncSession = Depends(get_session),
-    token: str = Depends(oauth2_scheme)
+    session: AsyncSession = Depends(get_session), token: str = Depends(oauth2_scheme)
 ) -> User:
     try:
         payload = jwt.decode(
@@ -31,13 +33,14 @@ async def get_current_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Could not validate credentials",
         )
-    
+
     result = await session.exec(select(User).where(User.username == username))
     user = result.first()
-    
+
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user
+
 
 async def get_current_active_superuser(
     current_user: User = Depends(get_current_user),

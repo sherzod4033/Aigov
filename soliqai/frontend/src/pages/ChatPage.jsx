@@ -1,28 +1,34 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ArrowRight, Paperclip, Shield, ThumbsDown, ThumbsUp, User } from 'lucide-react';
 import { useForm } from 'react-hook-form';
-import { chatService } from '../services/services';
+import { chatService } from '../services/chatService';
 import { Button } from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import { cn } from '../lib/utils';
 
 const INITIAL_ASSISTANT_MESSAGE = {
     role: 'assistant',
-    content: 'Здравствуйте! Я AndozAI, ваш налоговый помощник. Задавайте вопросы.',
+    content: 'Здравствуйте! Я KnowledgeAI, ваш помощник по работе с источниками. Задавайте вопросы.',
 };
 
 const QUICK_QUESTIONS = [
-    'Как оплатить НДС?',
-    'Ставки налога на патент 2024',
-    'Как сдать налоговую декларацию?',
-    'Найти ближайшую налоговую инспекцию',
+    'Сделай краткое summary загруженных источников',
+    'Какие основные темы встречаются в документах?',
+    'Найди ключевые определения по теме',
+    'Какие источники лучше всего отвечают на этот вопрос?',
 ];
 
-const CHAT_HISTORY_STORAGE_PREFIX = 'andozai.chat.history.';
+const CHAT_HISTORY_STORAGE_PREFIX = 'knowledgeai.chat.history.';
+const ACTIVE_NOTEBOOK_STORAGE_KEY = 'knowledgeai.activeNotebookId';
 const MAX_PERSISTED_MESSAGES = 100;
 const PENDING_MESSAGE_TTL_MS = 600000; // 10 минут — LLM отвечает до 5+ мин
 const PENDING_PLACEHOLDER_TEXT = 'Думаю...';
 const INTERRUPTED_PENDING_TEXT = 'Запрос был прерван при смене раздела. Отправьте вопрос снова.';
+const MODEL_OPTIONS = [
+    { value: 'default', label: 'Базовая модель' },
+    { value: 'balanced', label: 'Сбалансированная' },
+    { value: 'deep', label: 'Глубокий анализ' },
+];
 
 const resolveCurrentUsername = () => {
     if (typeof window === 'undefined') return 'anonymous';
@@ -42,7 +48,7 @@ const resolveCurrentUsername = () => {
     }
 };
 
-const getChatStorageKey = () => `${CHAT_HISTORY_STORAGE_PREFIX}${resolveCurrentUsername()}`;
+const getChatStorageKey = (scope) => `${CHAT_HISTORY_STORAGE_PREFIX}${resolveCurrentUsername()}.${scope}`;
 
 const createRequestId = () => {
     const now = Date.now();
@@ -240,13 +246,32 @@ const formatTodayLabel = () => {
     return `Today, ${formatted}`;
 };
 
-const ChatPage = () => {
+const resolveNotebookId = (notebookId) => {
+    if (notebookId !== undefined) {
+        return notebookId == null ? null : Number(notebookId);
+    }
+
+    const storedValue = localStorage.getItem(ACTIVE_NOTEBOOK_STORAGE_KEY);
+    return storedValue ? Number(storedValue) : null;
+};
+
+const formatNotebookLabel = (notebookId) => {
+    if (notebookId == null) return 'all sources';
+    return String(notebookId);
+};
+
+const ChatPage = ({ notebookId, mode = 'page' }) => {
     const { register, handleSubmit, reset } = useForm();
-    const chatStorageKey = getChatStorageKey();
+    const effectiveNotebookId = resolveNotebookId(notebookId);
+    const chatScope = effectiveNotebookId == null ? 'global' : `notebook.${effectiveNotebookId}`;
+    const chatStorageKey = getChatStorageKey(chatScope);
     const [messages, setMessages] = useState(() => loadMessagesFromStorage(chatStorageKey));
+    const [selectedModel, setSelectedModel] = useState(MODEL_OPTIONS[0].value);
     const messagesEndRef = useRef(null);
+    const isNotebookPanel = mode === 'notebookPanel';
 
     const hasPendingMessage = messages.some((message) => message.pending === true);
+    const hasConversation = messages.some((message, index) => index > 0 && !message.pending);
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -263,6 +288,21 @@ const ChatPage = () => {
     useEffect(() => {
         persistMessagesToStorage(chatStorageKey, messages);
     }, [chatStorageKey, messages]);
+
+    useEffect(() => {
+        if (notebookId !== undefined) return;
+
+        const handleStorage = (event) => {
+            if (event.key === ACTIVE_NOTEBOOK_STORAGE_KEY) {
+                const nextNotebookId = resolveNotebookId(undefined);
+                const nextScope = nextNotebookId == null ? 'global' : `notebook.${nextNotebookId}`;
+                setMessages(loadMessagesFromStorage(getChatStorageKey(nextScope)));
+            }
+        };
+
+        window.addEventListener('storage', handleStorage);
+        return () => window.removeEventListener('storage', handleStorage);
+    }, [notebookId]);
 
     const submitMessage = async (messageText) => {
         const cleanMessage = (messageText || '').trim();
@@ -286,7 +326,7 @@ const ChatPage = () => {
         reset();
 
         try {
-            const response = await chatService.sendMessage(cleanMessage);
+            const response = await chatService.sendMessage(cleanMessage, effectiveNotebookId);
             const botMessage = {
                 role: 'assistant',
                 content: response.data.answer,
@@ -349,7 +389,7 @@ const ChatPage = () => {
         return (
             <details className="mt-3 rounded-lg border border-slate-200 bg-white/70 px-3 py-2 text-xs text-slate-500">
                 <summary className="cursor-pointer list-none font-semibold uppercase tracking-[0.08em] text-[#1f3a60]">
-                    Правовые источники и ссылки
+                    Sources
                 </summary>
                 <div className="mt-2 space-y-1.5">
                     {sources.map((source, sourceIdx) => {
@@ -357,7 +397,7 @@ const ChatPage = () => {
                             return <div key={sourceIdx}>Source: {source}</div>;
                         }
 
-                        const docName = source.doc_name || `Document #${source.doc_id ?? 'N/A'}`;
+                        const docName = source.doc_name || `Source #${source.doc_id ?? 'N/A'}`;
                         const page = source.page ? `, page ${source.page}` : '';
                         const quote = source.quote ? ` — ${source.quote}` : '';
 
@@ -370,119 +410,192 @@ const ChatPage = () => {
 
     return (
         <div className="h-full w-full">
-            <div className="flex h-full flex-col overflow-hidden bg-white lg:border-l lg:border-slate-200">
+            <div className={cn('flex h-full flex-col overflow-hidden bg-white', !isNotebookPanel && 'lg:border-l lg:border-slate-200')}>
                 <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 sm:px-6">
-                    <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
-                        {formatTodayLabel()}
-                    </div>
-                    <Button variant="ghost" size="sm" onClick={handleClearChat} disabled={hasPendingMessage}>
-                        Очистить чат
-                    </Button>
+                    {isNotebookPanel ? (
+                        <>
+                            <div>
+                                <h3 className="text-lg font-semibold text-slate-900">Чат с блокнотом</h3>
+                                <p className="mt-1 text-sm text-slate-500">Задавайте вопросы только по материалам текущего блокнота.</p>
+                            </div>
+                            <Button type="button" variant="outline" size="sm" disabled title="История сессий пока недоступна">
+                                Сессии
+                            </Button>
+                        </>
+                    ) : (
+                        <>
+                            <div className="flex flex-wrap items-center gap-2">
+                                <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
+                                    {formatTodayLabel()}
+                                </div>
+                                <div className="rounded-full bg-[#1f3a60]/10 px-3 py-1 text-xs font-semibold text-[#1f3a60]">
+                                    notebook: {formatNotebookLabel(effectiveNotebookId)}
+                                </div>
+                            </div>
+                            <Button variant="ghost" size="sm" onClick={handleClearChat} disabled={hasPendingMessage}>
+                                Очистить чат
+                            </Button>
+                        </>
+                    )}
                 </div>
 
-                <div className="scrollbar-soft flex-1 space-y-6 overflow-y-auto bg-[#f6f8fc] px-4 py-6 sm:px-8">
-                    {messages.map((msg, idx) => (
-                        <div
-                            key={`${msg.role}-${idx}`}
-                            className={cn(
-                                'flex w-full items-start gap-3',
-                                msg.role === 'user' ? 'justify-end' : 'justify-start',
-                            )}
-                        >
-                            {msg.role === 'assistant' && (
-                                <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#1f3a60] text-[#c5a059]">
-                                    <Shield className="h-4 w-4" />
-                                </div>
-                            )}
-
-                            <div
-                                className={cn(
-                                    'max-w-[85%] rounded-2xl px-4 py-3 text-[15px] leading-relaxed shadow-sm sm:max-w-[74%]',
-                                    msg.role === 'user'
-                                        ? 'rounded-tr-md bg-[#1f3a60] text-white'
-                                        : 'rounded-tl-md border border-slate-200 bg-[#f2f4f7] text-slate-700',
-                                    msg.pending === true && 'animate-pulse',
-                                )}
-                            >
-                                {msg.role === 'assistant'
-                                    ? <MarkdownContent content={msg.content} />
-                                    : <div className="whitespace-pre-wrap">{msg.content}</div>}
-
-                                {renderSources(msg.sources)}
-
-                                {msg.role === 'assistant' && msg.logId && (
-                                    <div className="mt-3 flex gap-2 border-t border-slate-200 pt-2">
-                                        <button
-                                            onClick={() => handleFeedback(msg.logId, 'up', idx)}
-                                            className={cn(
-                                                'rounded-md p-1.5 transition',
-                                                msg.feedback === 'up' ? 'bg-green-100 text-green-600' : 'text-slate-400 hover:bg-slate-100',
-                                            )}
-                                            title="Good answer"
-                                        >
-                                            <ThumbsUp className="h-4 w-4" />
-                                        </button>
-                                        <button
-                                            onClick={() => handleFeedback(msg.logId, 'down', idx)}
-                                            className={cn(
-                                                'rounded-md p-1.5 transition',
-                                                msg.feedback === 'down' ? 'bg-red-100 text-red-600' : 'text-slate-400 hover:bg-slate-100',
-                                            )}
-                                            title="Bad answer"
-                                        >
-                                            <ThumbsDown className="h-4 w-4" />
-                                        </button>
-                                    </div>
-                                )}
+                <div className={cn('scrollbar-soft flex-1 overflow-y-auto px-4 py-6 sm:px-8', isNotebookPanel ? 'bg-slate-50' : 'space-y-6 bg-[#f6f8fc]')}>
+                    {isNotebookPanel && !hasConversation ? (
+                        <div className="flex h-full min-h-[260px] flex-col items-center justify-center rounded-3xl border border-dashed border-slate-200 bg-white px-6 text-center shadow-sm">
+                            <div className="rounded-2xl bg-[#1f3a60]/10 p-4 text-[#1f3a60]">
+                                <Shield className="h-6 w-6" />
                             </div>
-
-                            {msg.role === 'user' && (
-                                <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500">
-                                    <User className="h-4 w-4" />
-                                </div>
-                            )}
+                            <h4 className="mt-4 text-lg font-semibold text-slate-900">Диалог еще не начат</h4>
+                            <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">
+                                Спросите о ключевых фактах, выводах или спорных местах в источниках этого блокнота.
+                            </p>
                         </div>
-                    ))}
+                    ) : (
+                        <div className="space-y-6">
+                            {messages.map((msg, idx) => (
+                                <div
+                                    key={`${msg.role}-${idx}`}
+                                    className={cn(
+                                        'flex w-full items-start gap-3',
+                                        msg.role === 'user' ? 'justify-end' : 'justify-start',
+                                    )}
+                                >
+                                    {msg.role === 'assistant' && (
+                                        <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#1f3a60] text-[#c5a059]">
+                                            <Shield className="h-4 w-4" />
+                                        </div>
+                                    )}
+
+                                    <div
+                                        className={cn(
+                                            'max-w-[85%] rounded-2xl px-4 py-3 text-[15px] leading-relaxed shadow-sm sm:max-w-[74%]',
+                                            msg.role === 'user'
+                                                ? 'rounded-tr-md bg-[#1f3a60] text-white'
+                                                : 'rounded-tl-md border border-slate-200 bg-[#f2f4f7] text-slate-700',
+                                            msg.pending === true && 'animate-pulse',
+                                        )}
+                                    >
+                                        {msg.role === 'assistant'
+                                            ? <MarkdownContent content={msg.content} />
+                                            : <div className="whitespace-pre-wrap">{msg.content}</div>}
+
+                                        {renderSources(msg.sources)}
+
+                                        {msg.role === 'assistant' && msg.logId && (
+                                            <div className="mt-3 flex gap-2 border-t border-slate-200 pt-2">
+                                                <button
+                                                    onClick={() => handleFeedback(msg.logId, 'up', idx)}
+                                                    className={cn(
+                                                        'rounded-md p-1.5 transition',
+                                                        msg.feedback === 'up' ? 'bg-green-100 text-green-600' : 'text-slate-400 hover:bg-slate-100',
+                                                    )}
+                                                    title="Good answer"
+                                                >
+                                                    <ThumbsUp className="h-4 w-4" />
+                                                </button>
+                                                <button
+                                                    onClick={() => handleFeedback(msg.logId, 'down', idx)}
+                                                    className={cn(
+                                                        'rounded-md p-1.5 transition',
+                                                        msg.feedback === 'down' ? 'bg-red-100 text-red-600' : 'text-slate-400 hover:bg-slate-100',
+                                                    )}
+                                                    title="Bad answer"
+                                                >
+                                                    <ThumbsDown className="h-4 w-4" />
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {msg.role === 'user' && (
+                                        <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500">
+                                            <User className="h-4 w-4" />
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    )}
 
                     <div ref={messagesEndRef} />
                 </div>
 
                 <div className="border-t border-slate-200 bg-white px-4 py-4 sm:px-6">
-                    <div className="mb-3 flex flex-wrap gap-2">
-                        {QUICK_QUESTIONS.map((question) => (
-                            <button
-                                key={question}
-                                type="button"
-                                onClick={() => handleQuickQuestion(question)}
-                                disabled={hasPendingMessage}
-                                className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 disabled:opacity-55"
-                            >
-                                {question}
-                            </button>
-                        ))}
-                    </div>
+                    {isNotebookPanel ? (
+                        <>
+                            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-slate-50 px-4 py-3 text-xs font-medium text-slate-500">
+                                <span>Контекст: ответы опираются только на источники этого блокнота.</span>
+                                <label className="flex items-center gap-2 text-slate-600">
+                                    <span>Модель</span>
+                                    <select
+                                        value={selectedModel}
+                                        onChange={(event) => setSelectedModel(event.target.value)}
+                                        className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#1f3a60]/20"
+                                    >
+                                        {MODEL_OPTIONS.map((option) => (
+                                            <option key={option.value} value={option.value}>{option.label}</option>
+                                        ))}
+                                    </select>
+                                </label>
+                            </div>
 
-                    <form onSubmit={handleSubmit(onSubmit)} className="relative">
-                        <Paperclip className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                        <Input
-                            className="h-12 rounded-xl border-slate-300 bg-slate-50 pl-10 pr-14 focus:bg-white"
-                            placeholder="Введите ваш вопрос о налоговом законодательстве..."
-                            autoComplete="off"
-                            {...register('message')}
-                        />
-                        <Button
-                            type="submit"
-                            size="icon"
-                            className="absolute right-2 top-1/2 h-9 w-9 -translate-y-1/2 rounded-lg"
-                            disabled={hasPendingMessage}
-                        >
-                            <ArrowRight className="h-4 w-4" />
-                        </Button>
-                    </form>
+                            <form onSubmit={handleSubmit(onSubmit)} className="relative">
+                                <Paperclip className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                                <Input
+                                    className="h-12 rounded-2xl border-slate-300 bg-slate-50 pl-10 pr-14 focus:bg-white"
+                                    placeholder="Спросите о материалах этого блокнота..."
+                                    autoComplete="off"
+                                    {...register('message')}
+                                />
+                                <Button
+                                    type="submit"
+                                    size="icon"
+                                    className="absolute right-2 top-1/2 h-9 w-9 -translate-y-1/2 rounded-xl"
+                                    disabled={hasPendingMessage}
+                                >
+                                    <ArrowRight className="h-4 w-4" />
+                                </Button>
+                            </form>
+                        </>
+                    ) : (
+                        <>
+                            <div className="mb-3 flex flex-wrap gap-2">
+                                {QUICK_QUESTIONS.map((question) => (
+                                    <button
+                                        key={question}
+                                        type="button"
+                                        onClick={() => handleQuickQuestion(question)}
+                                        disabled={hasPendingMessage}
+                                        className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 disabled:opacity-55"
+                                    >
+                                        {question}
+                                    </button>
+                                ))}
+                            </div>
 
-                    <p className="mt-2 text-center text-[11px] font-medium text-slate-400">
-                        AndozAI может ошибаться. Проверяйте важную информацию в официальном Налоговом кодексе Таджикистана.
-                    </p>
+                            <form onSubmit={handleSubmit(onSubmit)} className="relative">
+                                <Paperclip className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                                <Input
+                                    className="h-12 rounded-xl border-slate-300 bg-slate-50 pl-10 pr-14 focus:bg-white"
+                                    placeholder="Введите вопрос по выбранным источникам..."
+                                    autoComplete="off"
+                                    {...register('message')}
+                                />
+                                <Button
+                                    type="submit"
+                                    size="icon"
+                                    className="absolute right-2 top-1/2 h-9 w-9 -translate-y-1/2 rounded-lg"
+                                    disabled={hasPendingMessage}
+                                >
+                                    <ArrowRight className="h-4 w-4" />
+                                </Button>
+                            </form>
+
+                            <p className="mt-2 text-center text-[11px] font-medium text-slate-400">
+                                KnowledgeAI может ошибаться. Проверяйте важную информацию по исходным материалам.
+                            </p>
+                        </>
+                    )}
                 </div>
             </div>
         </div>

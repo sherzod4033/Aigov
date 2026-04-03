@@ -1,0 +1,7 @@
+{
+  "chat_model": "gemma3:4b",
+  "embedding_model": "mxbai-embed-large:latest",
+  "top_k": 5,
+  "default_domain_profile": "tax",
+  "model": "gemma3:4b"
+}

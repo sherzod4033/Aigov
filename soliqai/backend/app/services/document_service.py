@@ -38,6 +38,10 @@ class DocumentService:
     def get_extension(filename: str) -> str:
         return Path(filename).suffix.lower()
 
+    @staticmethod
+    def _normalize_media_type(content_type: str | None) -> str:
+        return (content_type or "").split(";", 1)[0].strip().lower()
+
     @classmethod
     def validate_upload_file(cls, upload_file: UploadFile) -> str:
         if not upload_file.filename:
@@ -47,7 +51,7 @@ class DocumentService:
         if ext not in cls.ALLOWED_EXTENSIONS:
             raise ValueError("Unsupported file type. Allowed: PDF, DOCX, TXT")
 
-        content_type = (upload_file.content_type or "").lower()
+        content_type = cls._normalize_media_type(upload_file.content_type)
         allowed_types = cls.MIME_BY_EXTENSION.get(ext, set())
         if (
             content_type
@@ -122,7 +126,9 @@ class DocumentService:
         with fitz.open(file_path) as doc:
             for page_num, page in enumerate(doc, start=1):
                 # Try text layer first using blocks API for better structure
-                page_blocks = page.get_text("blocks")  # (x0, y0, x1, y1, text, block_no, block_type)
+                page_blocks = page.get_text(
+                    "blocks"
+                )  # (x0, y0, x1, y1, text, block_no, block_type)
 
                 # Collect text from text blocks (block_type 0 = text)
                 text_content = []
@@ -141,12 +147,14 @@ class DocumentService:
                     # OCR fallback for this specific page
                     ocr_text = OCRService.ocr_single_page(file_path, page_num)
                     if ocr_text.strip():
-                        blocks.append(TextBlock(
-                            text=ocr_text,
-                            page=page_num,
-                            order=order,
-                            source="ocr",
-                        ))
+                        blocks.append(
+                            TextBlock(
+                                text=ocr_text,
+                                page=page_num,
+                                order=order,
+                                source="ocr",
+                            )
+                        )
                         order += 1
                     continue
 
@@ -154,13 +162,15 @@ class DocumentService:
                 for b in block_infos:
                     text = b[4].strip()
                     if text:
-                        blocks.append(TextBlock(
-                            text=text,
-                            page=page_num,
-                            order=order,
-                            bbox=(b[0], b[1], b[2], b[3]),
-                            source="pymupdf",
-                        ))
+                        blocks.append(
+                            TextBlock(
+                                text=text,
+                                page=page_num,
+                                order=order,
+                                bbox=(b[0], b[1], b[2], b[3]),
+                                source="pymupdf",
+                            )
+                        )
                         order += 1
 
         return blocks
@@ -183,12 +193,14 @@ class DocumentService:
         for i, paragraph in enumerate(doc.paragraphs):
             text = paragraph.text.strip()
             if text:
-                blocks.append(TextBlock(
-                    text=text,
-                    page=1,  # DOCX doesn't have page numbers
-                    order=i,
-                    source="docx",
-                ))
+                blocks.append(
+                    TextBlock(
+                        text=text,
+                        page=1,  # DOCX doesn't have page numbers
+                        order=i,
+                        source="docx",
+                    )
+                )
 
         return blocks
 
@@ -196,11 +208,23 @@ class DocumentService:
     # TXT extraction
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _read_txt_content(file_path: str) -> str:
+        with open(file_path, "rb") as f:
+            raw_content = f.read()
+
+        for encoding in ("utf-8-sig", "utf-8", "cp1251", "windows-1251"):
+            try:
+                return raw_content.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+
+        return raw_content.decode("utf-8", errors="ignore")
+
     @classmethod
     def _extract_blocks_from_txt(cls, file_path: str) -> List[TextBlock]:
         """Read TXT file, split by double newlines into TextBlocks."""
-        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-            content = f.read()
+        content = cls._read_txt_content(file_path)
 
         paragraphs = re.split(r"\n\s*\n", content)
         blocks: List[TextBlock] = []
@@ -208,12 +232,14 @@ class DocumentService:
         for i, para in enumerate(paragraphs):
             text = para.strip()
             if text:
-                blocks.append(TextBlock(
-                    text=text,
-                    page=1,
-                    order=i,
-                    source="txt",
-                ))
+                blocks.append(
+                    TextBlock(
+                        text=text,
+                        page=1,
+                        order=i,
+                        source="txt",
+                    )
+                )
 
         return blocks
 
