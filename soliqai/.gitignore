@@ -1,4 +1,10 @@
 # Root .gitignore for SoliqAI project
+# Python virtual environments
+venv/
+.venv/
+env/
+.env/
+ENV/
 
 # Backend
 backend/.env
