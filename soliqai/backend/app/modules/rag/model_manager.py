@@ -1,4 +1,7 @@
+import json
 from typing import Any, Sequence
+import urllib.request
+from urllib.parse import urljoin
 
 import ollama
 
@@ -81,6 +84,22 @@ class ModelManager:
         return [list(item) for item in embeddings]
 
     @staticmethod
+    def _extract_openai_embeddings(response: dict[str, Any]) -> list[list[float]]:
+        data = response.get("data") or []
+        embeddings: list[list[float]] = []
+        for item in data:
+            embedding = item.get("embedding") if isinstance(item, dict) else None
+            if embedding:
+                embeddings.append(list(embedding))
+        if not embeddings:
+            raise ExternalServiceError(
+                "Ollama returned empty embeddings",
+                service="Ollama",
+                status_code=502,
+            )
+        return embeddings
+
+    @staticmethod
     def _extract_model_names(response: Any) -> list[str]:
         models = getattr(response, "models", None)
         if models is None and isinstance(response, dict):
@@ -125,7 +144,46 @@ class ModelManager:
                 input=list(texts),
             )
         except Exception as exc:
-            raise self._wrap_provider_error("Ollama", exc) from exc
+            # Older Ollama servers may not support the batch /api/embed route
+            # used by newer client versions. Fall back to per-text embeddings.
+            try:
+                embeddings: list[list[float]] = []
+                for text in texts:
+                    legacy_response = self._ollama_client.embeddings(
+                        model=resolved_model,
+                        prompt=text,
+                    )
+                    embedding = getattr(legacy_response, "embedding", None)
+                    if embedding is None and isinstance(legacy_response, dict):
+                        embedding = legacy_response.get("embedding")
+                    if not embedding:
+                        raise ExternalServiceError(
+                            "Ollama returned empty embeddings",
+                            service="Ollama",
+                            status_code=502,
+                        )
+                    embeddings.append(list(embedding))
+                return embeddings
+            except Exception:
+                try:
+                    request = urllib.request.Request(
+                        urljoin(
+                            settings.OLLAMA_API_BASE.rstrip("/") + "/",
+                            "v1/embeddings",
+                        ),
+                        data=json.dumps(
+                            {"model": resolved_model, "input": list(texts)}
+                        ).encode("utf-8"),
+                        headers={"Content-Type": "application/json"},
+                    )
+                    with urllib.request.urlopen(
+                        request, timeout=self._timeout
+                    ) as response:
+                        return self._extract_openai_embeddings(
+                            json.loads(response.read().decode("utf-8"))
+                        )
+                except Exception as fallback_exc:
+                    raise self._wrap_provider_error("Ollama", fallback_exc) from exc
         return self._extract_embeddings(response)
 
     def list_ollama_models(self) -> list[str]:

@@ -2,6 +2,7 @@ import json
 import logging
 import math
 import re
+from collections import Counter
 from time import perf_counter
 from typing import Any
 
@@ -9,13 +10,24 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.models import Chunk, Document, Log, Notebook, User
-from app.modules.chat.schemas import ChatRequest, ChatResponse, SourceItem
+from app.modules.chat.schemas import (
+    ChatRequest,
+    ChatResponse,
+    RetrievalChunkItem,
+    RetrievalRequest,
+    RetrievalResponse,
+    SourceItem,
+)
 from app.modules.rag.constants import DEFAULT_CHAT_MODEL
 from app.services.profile_resolver import resolve_profile
 from app.services.rag_service import RAGService, RELEVANCE_DISTANCE_THRESHOLD
 from app.services.runtime_settings_service import RuntimeSettingsService
 
 logger = logging.getLogger(__name__)
+
+LEXICAL_BM25_K1 = 1.5
+LEXICAL_BM25_B = 0.75
+RRF_K = 60
 
 
 def safe_float(value: Any) -> float | None:
@@ -80,7 +92,70 @@ def is_greeting(text: str) -> bool:
     return False
 
 
+def candidate_identity(item: dict[str, Any]) -> str:
+    metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    doc_id = metadata.get("doc_id")
+    chunk_index = metadata.get("chunk_index")
+    if doc_id is not None and chunk_index is not None:
+        return f"doc:{doc_id}:chunk:{chunk_index}"
+    chunk_id = item.get("chunk_id")
+    if chunk_id:
+        return f"chunk:{chunk_id}"
+    page = metadata.get("page")
+    text = " ".join(str(item.get("text") or "").split())
+    if doc_id is not None:
+        return f"doc:{doc_id}:page:{page}:text:{text[:160]}"
+    return text[:160]
+
+
+def _merge_candidate_data(*items: dict[str, Any]) -> dict[str, Any]:
+    merged: dict[str, Any] = {}
+    merged_metadata: dict[str, Any] = {}
+    for item in items:
+        if not item:
+            continue
+        if not merged:
+            merged = dict(item)
+        else:
+            for key, value in item.items():
+                if key == "metadata":
+                    continue
+                if merged.get(key) is None and value is not None:
+                    merged[key] = value
+        metadata = item.get("metadata")
+        if isinstance(metadata, dict):
+            for key, value in metadata.items():
+                if merged_metadata.get(key) is None and value is not None:
+                    merged_metadata[key] = value
+    merged["metadata"] = merged_metadata
+    return merged
+
+
 def select_relevant_chunks(
+    context: list[str],
+    context_chunk_ids: list[str],
+    context_metadatas: list[dict],
+    context_distances: list[Any],
+    allowed_doc_ids: set[int] | None = None,
+    query_text: str = "",
+    final_top_k: int = 5,
+    distance_threshold: float = RELEVANCE_DISTANCE_THRESHOLD,
+) -> list[dict[str, Any]]:
+    return rerank_retrieval_candidates(
+        collect_chunk_candidates(
+            context=context,
+            context_chunk_ids=context_chunk_ids,
+            context_metadatas=context_metadatas,
+            context_distances=context_distances,
+            allowed_doc_ids=allowed_doc_ids,
+        ),
+        query_text=query_text,
+        final_top_k=final_top_k,
+        distance_threshold=distance_threshold,
+    )
+
+
+def collect_chunk_candidates(
     context: list[str],
     context_chunk_ids: list[str],
     context_metadatas: list[dict],
@@ -113,16 +188,695 @@ def select_relevant_chunks(
                 "distance": distance,
             }
         )
+    return candidates
+
+
+def rank_vector_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    best_by_key: dict[str, dict[str, Any]] = {}
+    for item in candidates:
+        key = candidate_identity(item)
+        current = best_by_key.get(key)
+        if current is None:
+            best_by_key[key] = dict(item)
+            continue
+        current_distance = current.get("distance")
+        item_distance = item.get("distance")
+        if current_distance is None or (
+            item_distance is not None and item_distance < current_distance
+        ):
+            best_by_key[key] = _merge_candidate_data(item, current)
+        else:
+            best_by_key[key] = _merge_candidate_data(current, item)
+
+    ranked = list(best_by_key.values())
+    ranked.sort(
+        key=lambda item: (
+            item.get("distance") if item.get("distance") is not None else float("inf"),
+            item.get("idx", 0),
+        )
+    )
+    for rank, item in enumerate(ranked, start=1):
+        item["rank"] = rank
+        item["retrieval_method"] = "vector"
+    return ranked
+
+
+def rank_lexical_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    best_by_key: dict[str, dict[str, Any]] = {}
+    for item in candidates:
+        key = candidate_identity(item)
+        current = best_by_key.get(key)
+        if current is None:
+            best_by_key[key] = dict(item)
+            continue
+        current_score = current.get("lexical_score") or 0.0
+        item_score = item.get("lexical_score") or 0.0
+        if item_score > current_score:
+            best_by_key[key] = _merge_candidate_data(item, current)
+        else:
+            best_by_key[key] = _merge_candidate_data(current, item)
+
+    ranked = list(best_by_key.values())
+    ranked.sort(
+        key=lambda item: (
+            -(item.get("lexical_score") or 0.0),
+            item.get("idx", 0),
+            item.get("metadata", {}).get("page") or 0,
+        )
+    )
+    for rank, item in enumerate(ranked, start=1):
+        item["rank"] = rank
+        item["retrieval_method"] = "lexical"
+    return ranked
+
+
+async def lexical_retrieve_chunks(
+    *,
+    session: AsyncSession,
+    query_text: str,
+    allowed_doc_ids: set[int] | None,
+    retrieval_top_k: int,
+) -> list[dict[str, Any]]:
+    query_tokens = RAGService._query_tokens(query_text)
+    if not query_tokens:
+        return []
+    if allowed_doc_ids is not None and not allowed_doc_ids:
+        return []
+
+    statement = select(Chunk, Document).join(Document, Document.id == Chunk.doc_id)
+    if allowed_doc_ids is not None:
+        statement = statement.where(Chunk.doc_id.in_(allowed_doc_ids))
+
+    rows = (await session.exec(statement)).all()
+    if not rows:
+        return []
+
+    normalized_query = RAGService.normalize_query(query_text)
+    article_ref = RAGService._detect_article_reference(normalized_query)
+    query_years = set(re.findall(r"\b(?:19|20)\d{2}\b", query_text))
+    chunk_records: list[dict[str, Any]] = []
+    doc_frequency: Counter[str] = Counter()
+    total_length = 0
+    corpus_size = 0
+
+    for chunk, document in rows:
+        if allowed_doc_ids is not None and chunk.doc_id not in allowed_doc_ids:
+            continue
+        text = str(chunk.text or "")
+        token_list = RAGService.tokenize(text)
+        if not token_list:
+            continue
+        corpus_size += 1
+        total_length += len(token_list)
+        token_counts = Counter(token_list)
+        overlap = [token for token in query_tokens if token_counts.get(token)]
+        for token in set(overlap):
+            doc_frequency[token] += 1
+        if not overlap:
+            continue
+        chunk_records.append(
+            {
+                "chunk": chunk,
+                "document": document,
+                "token_counts": token_counts,
+                "chunk_length": len(token_list),
+            }
+        )
+
+    if not chunk_records:
+        return []
+
+    avg_chunk_length = total_length / max(corpus_size, 1)
+    ranked: list[dict[str, Any]] = []
+
+    for record in chunk_records:
+        chunk = record["chunk"]
+        document = record["document"]
+        token_counts: Counter[str] = record["token_counts"]
+        chunk_length = record["chunk_length"]
+        score = 0.0
+        for token in query_tokens:
+            term_frequency = token_counts.get(token, 0)
+            if term_frequency <= 0:
+                continue
+            frequency = doc_frequency.get(token, 0)
+            idf = math.log(1.0 + ((corpus_size - frequency + 0.5) / (frequency + 0.5)))
+            denominator = term_frequency + LEXICAL_BM25_K1 * (
+                1.0
+                - LEXICAL_BM25_B
+                + LEXICAL_BM25_B * (chunk_length / avg_chunk_length)
+            )
+            score += idf * ((term_frequency * (LEXICAL_BM25_K1 + 1.0)) / denominator)
+
+        normalized_text = RAGService.normalize_query(chunk.text)
+        if normalized_query and normalized_query in normalized_text:
+            score += 0.25
+        if article_ref and article_ref in normalized_text:
+            score += 0.35
+        if query_years and any(year in (document.name or "") for year in query_years):
+            score += 0.3
+
+        ranked.append(
+            {
+                "idx": chunk.chunk_index if chunk.chunk_index is not None else 0,
+                "text": chunk.text,
+                "metadata": {
+                    "doc_id": chunk.doc_id,
+                    "doc_name": document.name,
+                    "page": chunk.page,
+                    "chunk_index": chunk.chunk_index,
+                    "section": chunk.section,
+                },
+                "chunk_id": str(chunk.id) if chunk.id is not None else None,
+                "distance": None,
+                "lexical_score": round(score, 6),
+                "retrieval_method": "lexical",
+            }
+        )
+
+    ranked.sort(
+        key=lambda item: (
+            -(item.get("lexical_score") or 0.0),
+            item.get("idx", 0),
+            item.get("metadata", {}).get("page") or 0,
+        )
+    )
+    limited = ranked[:retrieval_top_k]
+    for rank, item in enumerate(limited, start=1):
+        item["rank"] = rank
+    return limited
+
+
+def fuse_candidates_with_rrf(
+    vector_candidates: list[dict[str, Any]], lexical_candidates: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    fused_by_key: dict[str, dict[str, Any]] = {}
+
+    def add_ranked(items: list[dict[str, Any]], rank_field: str) -> None:
+        for rank, item in enumerate(items, start=1):
+            key = candidate_identity(item)
+            fused = fused_by_key.get(key)
+            if fused is None:
+                fused = dict(item)
+                fused["modalities"] = set()
+                fused["rrf_score"] = 0.0
+                fused_by_key[key] = fused
+            else:
+                fused = _merge_candidate_data(fused, item)
+                fused.setdefault("modalities", set())
+                fused.setdefault("rrf_score", 0.0)
+                fused_by_key[key] = fused
+            fused[rank_field] = rank
+            fused["rrf_score"] += 1.0 / (RRF_K + rank)
+            method = item.get("retrieval_method")
+            if method:
+                fused["modalities"].add(method)
+
+    add_ranked(vector_candidates, "vector_rank")
+    add_ranked(lexical_candidates, "lexical_rank")
+
+    fused = list(fused_by_key.values())
+    fused.sort(
+        key=lambda item: (
+            -(item.get("rrf_score") or 0.0),
+            item.get("vector_rank") or float("inf"),
+            item.get("lexical_rank") or float("inf"),
+            item.get("idx", 0),
+        )
+    )
+    for rank, item in enumerate(fused, start=1):
+        item["rank"] = rank
+        modalities = sorted(item.pop("modalities", set()))
+        item["retrieval_method"] = "+".join(modalities) if modalities else "hybrid"
+        item["rrf_score"] = round(item.get("rrf_score") or 0.0, 6)
+    return fused
+
+
+def resolve_retrieval_limits(
+    runtime_settings: dict[str, Any],
+    requested_top_k: int | None = None,
+    requested_retrieval_top_k: int | None = None,
+) -> tuple[int, int]:
+    final_top_k = safe_int(
+        requested_top_k
+        if requested_top_k is not None
+        else runtime_settings.get("top_k"),
+        default=5,
+        min_value=1,
+        max_value=20,
+    )
+    retrieval_top_k = safe_int(
+        (
+            requested_retrieval_top_k
+            if requested_retrieval_top_k is not None
+            else runtime_settings.get("retrieval_top_k")
+        ),
+        default=20,
+        min_value=final_top_k,
+        max_value=50,
+    )
+    return retrieval_top_k, final_top_k
+
+
+def safe_int(
+    value: Any, default: int, min_value: int | None = None, max_value: int | None = None
+) -> int:
+    try:
+        result = int(value)
+    except (TypeError, ValueError):
+        result = default
+    if min_value is not None:
+        result = max(min_value, result)
+    if max_value is not None:
+        result = min(max_value, result)
+    return result
+
+
+def rerank_retrieval_candidates(
+    candidates: list[dict[str, Any]],
+    query_text: str,
+    final_top_k: int,
+    distance_threshold: float = RELEVANCE_DISTANCE_THRESHOLD,
+) -> list[dict[str, Any]]:
     if not candidates:
         return []
-    relevant = [
+
+    deduplicated: list[dict[str, Any]] = []
+    seen_keys: set[str] = set()
+    for item in candidates:
+        key = candidate_identity(item)
+        if not key or key in seen_keys:
+            continue
+        seen_keys.add(key)
+        deduplicated.append(item)
+
+    filtered = [
         item
-        for item in candidates
-        if item["distance"] is not None
-        and item["distance"] <= RELEVANCE_DISTANCE_THRESHOLD
+        for item in deduplicated
+        if item.get("distance") is None or item["distance"] <= distance_threshold
     ]
-    relevant.sort(key=lambda x: x["distance"])
-    return relevant[:5]
+    if not filtered:
+        filtered = list(deduplicated)
+
+    normalized_query = RAGService.normalize_query(query_text)
+    query_tokens = set(RAGService._query_tokens(query_text))
+    article_ref = RAGService._detect_article_reference(normalized_query)
+
+    for item in filtered:
+        item["rerank_score"] = _score_retrieval_candidate(
+            item,
+            normalized_query=normalized_query,
+            query_tokens=query_tokens,
+            article_ref=article_ref,
+        )
+
+    filtered.sort(
+        key=lambda item: (
+            -(item.get("rerank_score") or 0.0),
+            item.get("distance") if item.get("distance") is not None else float("inf"),
+            item.get("idx", 0),
+        )
+    )
+    return filtered[:final_top_k]
+
+
+def _score_retrieval_candidate(
+    item: dict[str, Any],
+    normalized_query: str,
+    query_tokens: set[str],
+    article_ref: str | None,
+) -> float:
+    text = str(item.get("text") or "")
+    metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    distance = item.get("distance")
+    query_years = set(re.findall(r"\b(?:19|20)\d{2}\b", normalized_query))
+
+    body_tokens = set(RAGService.tokenize(text))
+    title_tokens: set[str] = set()
+    metadata_text_parts: list[str] = []
+    for key in (
+        "title",
+        "heading",
+        "section_title",
+        "section",
+        "doc_name",
+        "category",
+        "article",
+    ):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            metadata_text_parts.append(value)
+            title_tokens.update(RAGService.tokenize(value))
+
+    overlap_ratio = 0.0
+    title_overlap_ratio = 0.0
+    if query_tokens:
+        overlap_ratio = len(query_tokens & body_tokens) / len(query_tokens)
+        title_overlap_ratio = len(query_tokens & title_tokens) / len(query_tokens)
+
+    combined_text = RAGService.normalize_query(" ".join([text, *metadata_text_parts]))
+    exact_phrase_boost = (
+        0.25 if normalized_query and normalized_query in combined_text else 0.0
+    )
+    article_boost = 0.35 if article_ref and article_ref in combined_text else 0.0
+    best_rank = min(
+        [
+            rank
+            for rank in [
+                item.get("rank"),
+                item.get("vector_rank"),
+                item.get("lexical_rank"),
+            ]
+            if isinstance(rank, int) and rank > 0
+        ],
+        default=10,
+    )
+    rank_boost = max(0.0, 0.08 - ((best_rank - 1) * 0.01))
+    year_boost = (
+        0.25
+        if query_years
+        and any(year in (metadata.get("doc_name") or "") for year in query_years)
+        else 0.0
+    )
+    distance_score = 0.15 if distance is None else 1.0 / (1.0 + max(distance, 0.0))
+
+    return round(
+        (distance_score * 0.45)
+        + (overlap_ratio * 0.3)
+        + (title_overlap_ratio * 0.12)
+        + exact_phrase_boost
+        + article_boost
+        + year_boost
+        + rank_boost,
+        6,
+    )
+
+
+async def run_retrieval(
+    *,
+    rag_service: RAGService,
+    session: AsyncSession,
+    profile: Any,
+    language: str,
+    search_query: str,
+    allowed_doc_ids: set[int] | None,
+    retrieval_top_k: int,
+    final_top_k: int,
+    original_query: str | None = None,
+) -> list[dict[str, Any]]:
+    retrieval_result = await run_hybrid_retrieval(
+        rag_service=rag_service,
+        session=session,
+        profile=profile,
+        language=language,
+        search_query=search_query,
+        original_query=original_query,
+        allowed_doc_ids=allowed_doc_ids,
+        retrieval_top_k=retrieval_top_k,
+        final_top_k=final_top_k,
+    )
+    return retrieval_result["final_chunks"]
+
+
+async def run_hybrid_retrieval(
+    *,
+    rag_service: RAGService,
+    session: AsyncSession,
+    profile: Any,
+    language: str,
+    search_query: str,
+    original_query: str | None,
+    allowed_doc_ids: set[int] | None,
+    retrieval_top_k: int,
+    final_top_k: int,
+) -> dict[str, list[dict[str, Any]]]:
+    pooled_vector_candidates: list[dict[str, Any]] = []
+    pooled_lexical_candidates: list[dict[str, Any]] = []
+    search_queries: list[str] = []
+    for candidate in [original_query, search_query]:
+        if candidate and candidate not in search_queries:
+            search_queries.append(candidate)
+    for candidate in list(search_queries):
+        for expanded in profile.search_queries(candidate, language):
+            if expanded and expanded not in search_queries:
+                search_queries.append(expanded)
+    for candidate_query in search_queries:
+        logger.debug(
+            "Querying ChromaDB with: %s, retrieval_top_k=%s",
+            candidate_query,
+            retrieval_top_k,
+        )
+        results = rag_service.query_documents(
+            candidate_query, n_results=retrieval_top_k
+        )
+        results = profile.rerank_results(candidate_query, results)
+        documents = results.get("documents", [])
+        chunk_ids = results.get("ids", [])
+        metadatas = results.get("metadatas", [])
+        distances = results.get("distances", [])
+        query_candidates = collect_chunk_candidates(
+            context=documents[0] if documents else [],
+            context_chunk_ids=chunk_ids[0] if chunk_ids else [],
+            context_metadatas=metadatas[0] if metadatas else [],
+            context_distances=distances[0] if distances else [],
+            allowed_doc_ids=allowed_doc_ids,
+        )
+        for item in query_candidates:
+            item["retrieval_method"] = "vector"
+        pooled_vector_candidates.extend(query_candidates)
+        pooled_lexical_candidates.extend(
+            await lexical_retrieve_chunks(
+                session=session,
+                query_text=candidate_query,
+                allowed_doc_ids=allowed_doc_ids,
+                retrieval_top_k=retrieval_top_k,
+            )
+        )
+
+    vector_candidates = rank_vector_candidates(pooled_vector_candidates)[
+        :retrieval_top_k
+    ]
+    lexical_candidates = rank_lexical_candidates(pooled_lexical_candidates)[
+        :retrieval_top_k
+    ]
+
+    fused_candidates = fuse_candidates_with_rrf(vector_candidates, lexical_candidates)
+    final_chunks = rerank_retrieval_candidates(
+        fused_candidates,
+        query_text=search_query,
+        final_top_k=final_top_k,
+    )
+    return {
+        "vector_candidates": vector_candidates,
+        "lexical_candidates": lexical_candidates,
+        "fused_candidates": fused_candidates,
+        "final_chunks": final_chunks,
+    }
+
+
+async def retrieve_year_targeted_chunks(
+    *,
+    session: AsyncSession,
+    question: str,
+    allowed_doc_ids: set[int] | None,
+    final_top_k: int,
+) -> list[dict[str, Any]]:
+    year_match = re.search(r"\b(?:19|20)\d{2}\b", question)
+    if not year_match or not allowed_doc_ids:
+        return []
+
+    target_year = year_match.group(0)
+    docs_result = await session.exec(
+        select(Document).where(Document.id.in_(allowed_doc_ids))
+    )
+    target_docs = [
+        doc for doc in docs_result.all() if target_year in str(doc.name or "")
+    ]
+    if not target_docs:
+        return []
+
+    target_doc = target_docs[0]
+
+    # Use ChromaDB directly with a doc_id filter instead of re-embedding all chunks
+    rag_service = RAGService()
+    try:
+        results = rag_service.query_documents(
+            question,
+            n_results=final_top_k,
+            where={"doc_id": target_doc.id},
+        )
+    except Exception:
+        return []
+
+    documents = results.get("documents", [[]])[0]
+    chunk_ids = results.get("ids", [[]])[0]
+    metadatas = results.get("metadatas", [[]])[0]
+    distances = results.get("distances", [[]])[0]
+
+    ranked: list[dict[str, Any]] = []
+    for i, doc_text in enumerate(documents):
+        if not doc_text:
+            continue
+        meta = metadatas[i] if i < len(metadatas) and isinstance(metadatas[i], dict) else {}
+        distance = safe_float(distances[i] if i < len(distances) else None)
+        ranked.append(
+            {
+                "idx": meta.get("chunk_index") or i,
+                "text": doc_text,
+                "metadata": {
+                    "doc_id": target_doc.id,
+                    "doc_name": target_doc.name,
+                    "page": meta.get("page"),
+                    "chunk_index": meta.get("chunk_index"),
+                    "section": meta.get("section"),
+                },
+                "chunk_id": chunk_ids[i] if i < len(chunk_ids) else None,
+                "distance": distance,
+                "retrieval_method": "year_fallback",
+                "rerank_score": 1.0 / (1.0 + max(distance, 0.0)) if distance is not None else 0.15,
+            }
+        )
+
+    ranked.sort(
+        key=lambda item: (-(item.get("rerank_score") or 0.0), item.get("idx", 0))
+    )
+    return ranked[:final_top_k]
+
+
+async def retrieve_chunks(
+    retrieval_request: RetrievalRequest,
+    current_user: User,
+    session: AsyncSession,
+) -> RetrievalResponse:
+    rag_service = RAGService()
+    normalized_question = rag_service.normalize_query(retrieval_request.question)
+    language = rag_service.detect_language(normalized_question)
+    runtime_settings = RuntimeSettingsService.get_settings()
+    retrieval_top_k, final_top_k = resolve_retrieval_limits(
+        runtime_settings,
+        requested_top_k=retrieval_request.top_k,
+        requested_retrieval_top_k=retrieval_request.retrieval_top_k,
+    )
+    model = runtime_settings.get("chat_model") or runtime_settings.get(
+        "model", DEFAULT_CHAT_MODEL
+    )
+
+    notebook: Notebook | None = None
+    if retrieval_request.notebook_id is not None:
+        notebook = await session.get(Notebook, retrieval_request.notebook_id)
+    if notebook is None:
+        notebook_result = await session.exec(
+            select(Notebook).order_by(Notebook.created_at.asc()).limit(1)
+        )
+        notebook = notebook_result.first()
+
+    profile = resolve_profile(
+        notebook=notebook, requested=retrieval_request.domain_profile
+    )
+
+    history_result = await session.exec(
+        select(Log)
+        .where(Log.user_id == current_user.id)
+        .where(Log.notebook_id == (notebook.id if notebook else None))
+        .order_by(Log.created_at.desc())
+        .limit(5)
+    )
+    history_logs = sorted(history_result.all(), key=lambda x: x.created_at)
+    chat_history = []
+    for log in history_logs:
+        chat_history.append({"role": "user", "content": log.question})
+        chat_history.append({"role": "assistant", "content": log.answer})
+
+    article_ref = rag_service._detect_article_reference(normalized_question)
+    if article_ref:
+        search_query = normalized_question
+    else:
+        search_query = await rag_service.condense_query(
+            normalized_question, chat_history, model=model
+        )
+
+    allowed_doc_ids: set[int] | None = None
+    if notebook and notebook.id is not None:
+        notebook_docs_result = await session.exec(
+            select(Document.id).where(Document.notebook_id == notebook.id)
+        )
+        allowed_doc_ids = {
+            doc_id for doc_id in notebook_docs_result.all() if doc_id is not None
+        }
+
+    retrieval_result = await run_hybrid_retrieval(
+        rag_service=rag_service,
+        session=session,
+        profile=profile,
+        language=language,
+        search_query=search_query,
+        original_query=normalized_question,
+        allowed_doc_ids=allowed_doc_ids,
+        retrieval_top_k=retrieval_top_k,
+        final_top_k=final_top_k,
+    )
+    selected_chunks = retrieval_result["final_chunks"]
+
+    doc_id_set = {
+        item["metadata"].get("doc_id")
+        for item in [
+            *retrieval_result["vector_candidates"],
+            *retrieval_result["lexical_candidates"],
+            *retrieval_result["fused_candidates"],
+            *selected_chunks,
+        ]
+        if item["metadata"].get("doc_id") is not None
+    }
+    doc_name_map: dict[int, str] = {}
+    if doc_id_set:
+        docs_result = await session.exec(
+            select(Document).where(Document.id.in_(doc_id_set))
+        )
+        for doc in docs_result.all():
+            doc_name_map[doc.id] = doc.name
+
+    def to_retrieval_chunk_item(item: dict[str, Any]) -> RetrievalChunkItem:
+        chunk_text = item["text"]
+        metadata = item["metadata"]
+        doc_id = metadata.get("doc_id")
+        quote = (chunk_text or "").strip().replace("\n", " ")
+        if len(quote) > 240:
+            quote = quote[:240].rstrip() + "..."
+        return RetrievalChunkItem(
+            rank=item.get("rank"),
+            retrieval_method=item.get("retrieval_method"),
+            doc_id=doc_id,
+            doc_name=metadata.get("doc_name") or doc_name_map.get(doc_id),
+            page=metadata.get("page"),
+            chunk_id=item.get("chunk_id"),
+            quote=quote or None,
+            distance=item.get("distance"),
+            lexical_score=item.get("lexical_score"),
+            rrf_score=item.get("rrf_score"),
+            rerank_score=item.get("rerank_score"),
+        )
+
+    chunks = [to_retrieval_chunk_item(item) for item in selected_chunks]
+
+    return RetrievalResponse(
+        question=retrieval_request.question,
+        search_query=search_query,
+        retrieval_top_k=retrieval_top_k,
+        top_k=final_top_k,
+        vector_candidates=[
+            to_retrieval_chunk_item(item)
+            for item in retrieval_result["vector_candidates"]
+        ],
+        lexical_candidates=[
+            to_retrieval_chunk_item(item)
+            for item in retrieval_result["lexical_candidates"]
+        ],
+        fused_candidates=[
+            to_retrieval_chunk_item(item)
+            for item in retrieval_result["fused_candidates"]
+        ],
+        chunks=chunks,
+    )
 
 
 async def chat_request(
@@ -135,7 +889,7 @@ async def chat_request(
     normalized_question = rag_service.normalize_query(chat_request.question)
     language = rag_service.detect_language(normalized_question)
     runtime_settings = RuntimeSettingsService.get_settings()
-    top_k = runtime_settings.get("top_k", 5)
+    retrieval_top_k, top_k = resolve_retrieval_limits(runtime_settings)
     model = runtime_settings.get("chat_model") or runtime_settings.get(
         "model", DEFAULT_CHAT_MODEL
     )
@@ -229,29 +983,17 @@ async def chat_request(
         }
 
     selected_chunks: list[dict[str, Any]] = []
-    search_queries = profile.search_queries(search_query, language)
-    search_limit = max(top_k * 5, 20) if allowed_doc_ids else top_k
-    for candidate_query in search_queries:
-        logger.debug(f"Querying ChromaDB with: {candidate_query}, top_k={search_limit}")
-        results = rag_service.query_documents(candidate_query, n_results=search_limit)
-        results = profile.rerank_results(candidate_query, results)
-        documents = results.get("documents", [])
-        chunk_ids = results.get("ids", [])
-        metadatas = results.get("metadatas", [])
-        distances = results.get("distances", [])
-        context = documents[0] if documents else []
-        context_chunk_ids = chunk_ids[0] if chunk_ids else []
-        context_metadatas = metadatas[0] if metadatas else []
-        context_distances = distances[0] if distances else []
-        selected_chunks = select_relevant_chunks(
-            context=context,
-            context_chunk_ids=context_chunk_ids,
-            context_metadatas=context_metadatas,
-            context_distances=context_distances,
-            allowed_doc_ids=allowed_doc_ids,
-        )
-        if selected_chunks:
-            break
+    selected_chunks = await run_retrieval(
+        rag_service=rag_service,
+        session=session,
+        profile=profile,
+        language=language,
+        search_query=search_query,
+        original_query=normalized_question,
+        allowed_doc_ids=allowed_doc_ids,
+        retrieval_top_k=retrieval_top_k,
+        final_top_k=top_k,
+    )
 
     if not selected_chunks:
         answer_text = no_data_answer
@@ -323,6 +1065,66 @@ async def chat_request(
         answer_rules=profile.answer_rules(language),
         no_data_answer=no_data_answer,
     )
+    if is_no_data_answer(answer):
+        fallback_chunks = await retrieve_year_targeted_chunks(
+            session=session,
+            question=chat_request.question,
+            allowed_doc_ids=allowed_doc_ids,
+            final_top_k=top_k,
+        )
+        if fallback_chunks:
+            fallback_doc_ids = {
+                item["metadata"].get("doc_id")
+                for item in fallback_chunks
+                if item["metadata"].get("doc_id") is not None
+            }
+            fallback_doc_name_map: dict[int, str] = {}
+            if fallback_doc_ids:
+                docs_result = await session.exec(
+                    select(Document).where(Document.id.in_(fallback_doc_ids))
+                )
+                for doc in docs_result.all():
+                    fallback_doc_name_map[doc.id] = doc.name
+
+            fallback_sources: list[SourceItem] = []
+            fallback_context = await expand_with_neighbors(fallback_chunks, session)
+            fallback_filtered_context: list[str] = list(fallback_context)
+            for item in fallback_chunks:
+                chunk_text = item["text"]
+                meta = item["metadata"]
+                doc_id = meta.get("doc_id")
+                doc_name = meta.get("doc_name") or fallback_doc_name_map.get(doc_id)
+                page = meta.get("page")
+                chunk_id = item["chunk_id"]
+                quote = (chunk_text or "").strip().replace("\n", " ")
+                if len(quote) > 240:
+                    quote = quote[:240].rstrip() + "..."
+                if chunk_text not in fallback_filtered_context:
+                    fallback_filtered_context.append(chunk_text)
+                fallback_sources.append(
+                    SourceItem(
+                        source_type="source",
+                        doc_id=doc_id,
+                        doc_name=doc_name,
+                        page=page,
+                        chunk_id=chunk_id,
+                        quote=quote or None,
+                    )
+                )
+
+            fallback_answer = await rag_service.generate_answer(
+                query=normalized_question,
+                context=fallback_filtered_context,
+                chat_history=chat_history,
+                language=language,
+                model=model,
+                assistant_name=profile.assistant_name,
+                answer_rules=profile.answer_rules(language),
+                no_data_answer=no_data_answer,
+            )
+            if not is_no_data_answer(fallback_answer):
+                answer = fallback_answer
+                sources = fallback_sources
     if is_no_data_answer(answer):
         sources = []
     log_entry = Log(

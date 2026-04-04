@@ -150,14 +150,18 @@ class ChromaGateway:
         self, documents: list[str], metadatas: list[dict], ids: list[str]
     ) -> None:
         try:
-            self.collection.add(documents=documents, metadatas=metadatas, ids=ids)
+            embeddings = self.model_manager.embed(documents, model=self.embedding_model)
+            self.collection.add(
+                documents=documents,
+                metadatas=metadatas,
+                ids=ids,
+                embeddings=embeddings,
+            )
         except ExternalServiceError:
             raise
         except Exception as exc:
             message = str(exc).lower()
-            if (
-                "input length exceeds the context length" in message
-            ):
+            if "input length exceeds the context length" in message:
                 logger.warning(
                     "Embedding batch exceeded context length: batch_size=%s max_chars=%s model=%s",
                     len(documents),
@@ -218,7 +222,13 @@ class ChromaGateway:
                 status_code=503,
                 cause=self.chroma_error,
             )
-        query_kwargs = {"query_texts": [query_text], "n_results": n_results}
+        query_embeddings = self.model_manager.embed(
+            [query_text], model=self.embedding_model
+        )
+        query_kwargs = {
+            "query_embeddings": query_embeddings,
+            "n_results": n_results,
+        }
         if where:
             query_kwargs["where"] = where
         try:

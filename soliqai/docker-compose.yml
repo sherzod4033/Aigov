@@ -8,8 +8,6 @@ services:
       POSTGRES_USER: andozai_user
       POSTGRES_PASSWORD: andozai_password
       POSTGRES_DB: andozai_db
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -21,8 +19,6 @@ services:
   chromadb:
     image: chromadb/chroma:latest
     container_name: andozai-chromadb
-    ports:
-      - "8000:8000"
     volumes:
       - chroma_data:/chroma/chroma
     environment:
@@ -35,7 +31,7 @@ services:
       dockerfile: Dockerfile
     container_name: andozai-backend
     ports:
-      - "8001:8001"
+      - "127.0.0.1:8001:8001"
     environment:
       - ENVIRONMENT=production
       - POSTGRES_SERVER=postgres
@@ -68,7 +64,7 @@ services:
       dockerfile: Dockerfile
     container_name: andozai-frontend
     ports:
-      - "80:80"
+      - "127.0.0.1:3000:80"
     depends_on:
       - backend
 

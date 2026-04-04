@@ -610,7 +610,7 @@ const NotebookWorkspace = ({ notebookId }) => {
           />
 
           {/* Dialog */}
-          <div className="relative flex w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+          <div className="relative flex w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-2xl max-h-[80vh]">
             {/* Header */}
             <div className="flex items-start justify-between gap-4 px-6 py-5">
               <div>

@@ -26,6 +26,7 @@ class DocumentModuleService:
             max_tokens=180,
             min_tokens=60,
             max_chars=600,
+            overlap_tokens=30,
         )
 
     @staticmethod

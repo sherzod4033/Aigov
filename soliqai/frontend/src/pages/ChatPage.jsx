@@ -126,6 +126,19 @@ const replacePendingMessageByRequestId = (messages, requestId, nextMessage) => {
     return updated;
 };
 
+const removePendingMessageByRequestId = (messages, requestId) => {
+    if (!requestId) return messages;
+
+    let removed = false;
+    return messages.filter((message) => {
+        if (!removed && message.pending === true && message.requestId === requestId) {
+            removed = true;
+            return false;
+        }
+        return true;
+    });
+};
+
 const resolvePendingMessages = (messages) => {
     const now = Date.now();
     let changed = false;
@@ -268,6 +281,7 @@ const ChatPage = ({ notebookId, mode = 'page' }) => {
     const [messages, setMessages] = useState(() => loadMessagesFromStorage(chatStorageKey));
     const [selectedModel, setSelectedModel] = useState(MODEL_OPTIONS[0].value);
     const messagesEndRef = useRef(null);
+    const isPageLeavingRef = useRef(false);
     const isNotebookPanel = mode === 'notebookPanel';
 
     const hasPendingMessage = messages.some((message) => message.pending === true);
@@ -303,6 +317,23 @@ const ChatPage = ({ notebookId, mode = 'page' }) => {
         window.addEventListener('storage', handleStorage);
         return () => window.removeEventListener('storage', handleStorage);
     }, [notebookId]);
+
+    useEffect(() => {
+        isPageLeavingRef.current = false;
+
+        const markPageLeaving = () => {
+            isPageLeavingRef.current = true;
+        };
+
+        window.addEventListener('beforeunload', markPageLeaving);
+        window.addEventListener('pagehide', markPageLeaving);
+
+        return () => {
+            markPageLeaving();
+            window.removeEventListener('beforeunload', markPageLeaving);
+            window.removeEventListener('pagehide', markPageLeaving);
+        };
+    }, []);
 
     const submitMessage = async (messageText) => {
         const cleanMessage = (messageText || '').trim();
@@ -340,6 +371,18 @@ const ChatPage = ({ notebookId, mode = 'page' }) => {
             setMessages((prev) => replacePendingMessageByRequestId(prev, requestId, botMessage));
         } catch (error) {
             console.error(error);
+            const isInterruptedRequest =
+                isPageLeavingRef.current ||
+                document.visibilityState === 'hidden' ||
+                error?.code === 'ERR_CANCELED' ||
+                error?.name === 'CanceledError';
+            if (isInterruptedRequest) {
+                const stored = loadMessagesFromStorage(chatStorageKey);
+                const storageUpdated = removePendingMessageByRequestId(stored, requestId);
+                persistMessagesToStorage(chatStorageKey, storageUpdated);
+                setMessages((prev) => removePendingMessageByRequestId(prev, requestId));
+                return;
+            }
             // Check if it's an authentication error
             const isAuthError = error.response?.status === 403 || error.response?.status === 401;
             const errorContent = isAuthError

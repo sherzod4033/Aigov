@@ -10,7 +10,8 @@ from app.modules.chat.service import (
     expand_with_neighbors,
     is_greeting,
     is_no_data_answer,
-    select_relevant_chunks,
+    resolve_retrieval_limits,
+    run_retrieval,
 )
 from app.modules.rag.constants import DEFAULT_CHAT_MODEL
 from app.services.profile_resolver import resolve_profile
@@ -28,7 +29,10 @@ async def handle_ask_request(
     normalized_question = rag_service.normalize_query(ask_request.question)
     language = rag_service.detect_language(normalized_question)
     runtime_settings = RuntimeSettingsService.get_settings()
-    top_k = ask_request.top_k or runtime_settings.get("top_k", 5)
+    retrieval_top_k, top_k = resolve_retrieval_limits(
+        runtime_settings,
+        requested_top_k=ask_request.top_k,
+    )
     model = runtime_settings.get("chat_model") or runtime_settings.get(
         "model", DEFAULT_CHAT_MODEL
     )
@@ -90,24 +94,16 @@ async def handle_ask_request(
         }
 
     selected_chunks: list[dict] = []
-    search_queries = profile.search_queries(search_query, language)
-    search_limit = max(top_k * 5, 20) if allowed_doc_ids else top_k
-    for candidate_query in search_queries:
-        results = rag_service.query_documents(candidate_query, n_results=search_limit)
-        results = profile.rerank_results(candidate_query, results)
-        documents = results.get("documents", [])
-        chunk_ids = results.get("ids", [])
-        metadatas = results.get("metadatas", [])
-        distances = results.get("distances", [])
-        selected_chunks = select_relevant_chunks(
-            context=documents[0] if documents else [],
-            context_chunk_ids=chunk_ids[0] if chunk_ids else [],
-            context_metadatas=metadatas[0] if metadatas else [],
-            context_distances=distances[0] if distances else [],
-            allowed_doc_ids=allowed_doc_ids,
-        )
-        if selected_chunks:
-            break
+    selected_chunks = await run_retrieval(
+        rag_service=rag_service,
+        session=session,
+        profile=profile,
+        language=language,
+        search_query=search_query,
+        allowed_doc_ids=allowed_doc_ids,
+        retrieval_top_k=retrieval_top_k,
+        final_top_k=top_k,
+    )
 
     if not selected_chunks:
         answer = no_data_answer

@@ -5,6 +5,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from types import SimpleNamespace
 
 from app.modules.chat.service import is_no_data_answer as _is_no_data_answer
+from app.modules.chat.service import (
+    fuse_candidates_with_rrf as _fuse_candidates_with_rrf,
+)
+from app.modules.chat.service import (
+    lexical_retrieve_chunks as _lexical_retrieve_chunks,
+)
+from app.modules.chat.service import (
+    resolve_retrieval_limits as _resolve_retrieval_limits,
+)
 from app.modules.chat.service import select_relevant_chunks as _select_relevant_chunks
 from app.modules.documents.service import DocumentModuleService
 from app.services.document_service import DocumentService
@@ -121,6 +130,92 @@ class RagServiceHelpersTests(unittest.TestCase):
         ref = RAGService._detect_article_reference("Какая ставка НДС?")
         self.assertIsNone(ref)
 
+    def test_resolve_retrieval_limits_defaults_to_broader_fetch(self):
+        retrieval_top_k, final_top_k = _resolve_retrieval_limits({})
+        self.assertEqual(retrieval_top_k, 20)
+        self.assertEqual(final_top_k, 5)
+
+    def test_select_relevant_chunks_reranks_for_query_overlap(self):
+        selected = _select_relevant_chunks(
+            context=[
+                "Общие положения и описание процедур без ставки налога.",
+                "Ставка НДС составляет 20 процентов для стандартных операций.",
+            ],
+            context_chunk_ids=["1", "2"],
+            context_metadatas=[
+                {"doc_id": 10, "doc_name": "general.txt"},
+                {"doc_id": 11, "doc_name": "nds.txt", "title": "Ставка НДС"},
+            ],
+            context_distances=[0.05, 0.22],
+            query_text="какая ставка ндс 20 процентов",
+            final_top_k=2,
+        )
+        self.assertEqual(selected[0]["chunk_id"], "2")
+        self.assertGreater(selected[0]["rerank_score"], selected[1]["rerank_score"])
+
+    def test_select_relevant_chunks_boosts_article_reference_match(self):
+        selected = _select_relevant_chunks(
+            context=[
+                "Статья 81. Порядок уплаты налога и сроки исполнения обязательства.",
+                "Общий обзор налоговых обязанностей и терминов.",
+            ],
+            context_chunk_ids=["a", "b"],
+            context_metadatas=[
+                {"doc_id": 20, "doc_name": "code.txt", "section_title": "Статья 81"},
+                {"doc_id": 20, "doc_name": "code.txt"},
+            ],
+            context_distances=[0.4, 0.15],
+            query_text="что сказано в статье 81",
+            final_top_k=2,
+        )
+        self.assertEqual(selected[0]["chunk_id"], "a")
+
+    def test_rrf_fusion_deduplicates_by_chunk_identity(self):
+        fused = _fuse_candidates_with_rrf(
+            vector_candidates=[
+                {
+                    "idx": 0,
+                    "text": "Ставка НДС составляет 20 процентов.",
+                    "chunk_id": "vec-1",
+                    "distance": 0.08,
+                    "metadata": {"doc_id": 5, "chunk_index": 3, "page": 1},
+                    "retrieval_method": "vector",
+                },
+                {
+                    "idx": 1,
+                    "text": "Порядок подачи декларации.",
+                    "chunk_id": "vec-2",
+                    "distance": 0.12,
+                    "metadata": {"doc_id": 5, "chunk_index": 8, "page": 2},
+                    "retrieval_method": "vector",
+                },
+            ],
+            lexical_candidates=[
+                {
+                    "idx": 3,
+                    "text": "Ставка НДС составляет 20 процентов.",
+                    "chunk_id": "sql-77",
+                    "lexical_score": 3.2,
+                    "metadata": {"doc_id": 5, "chunk_index": 3, "page": 1},
+                    "retrieval_method": "lexical",
+                },
+                {
+                    "idx": 0,
+                    "text": "Льготы по налогу на прибыль.",
+                    "chunk_id": "sql-88",
+                    "lexical_score": 2.7,
+                    "metadata": {"doc_id": 6, "chunk_index": 1, "page": 4},
+                    "retrieval_method": "lexical",
+                },
+            ],
+        )
+
+        self.assertEqual(len(fused), 3)
+        self.assertEqual(fused[0]["metadata"]["doc_id"], 5)
+        self.assertEqual(fused[0]["metadata"]["chunk_index"], 3)
+        self.assertEqual(fused[0]["retrieval_method"], "lexical+vector")
+        self.assertGreater(fused[0]["rrf_score"], fused[1]["rrf_score"])
+
     @patch("app.services.rag_service.RAGService._init_chroma")
     def test_boost_article_chunks_reorders(self, mock_init):
         rag = RAGService()
@@ -184,7 +279,10 @@ class RagServiceHelpersTests(unittest.TestCase):
 class DocumentModuleServiceTests(unittest.IsolatedAsyncioTestCase):
     @patch("app.modules.documents.service.RAGService")
     @patch("app.modules.documents.service.run_in_threadpool", new_callable=AsyncMock)
-    @patch("app.modules.documents.service.SourceService.save_upload_file", new_callable=AsyncMock)
+    @patch(
+        "app.modules.documents.service.SourceService.save_upload_file",
+        new_callable=AsyncMock,
+    )
     @patch("app.modules.documents.service.SourceService.validate_upload_file")
     async def test_upload_document_marks_saved_doc_as_error_when_indexing_fails(
         self,
@@ -211,7 +309,11 @@ class DocumentModuleServiceTests(unittest.IsolatedAsyncioTestCase):
             get=AsyncMock(return_value=None),
             add=MagicMock(),
             commit=AsyncMock(),
-            refresh=AsyncMock(side_effect=lambda obj: setattr(obj, "id", getattr(obj, "id", None) or 101)),
+            refresh=AsyncMock(
+                side_effect=lambda obj: setattr(
+                    obj, "id", getattr(obj, "id", None) or 101
+                )
+            ),
             flush=AsyncMock(side_effect=lambda: None),
         )
 
@@ -224,6 +326,51 @@ class DocumentModuleServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(document.id, 101)
         self.assertEqual(session.commit.await_count, 3)
         rag_instance.add_documents.assert_called_once()
+
+
+class HybridRetrievalTests(unittest.IsolatedAsyncioTestCase):
+    async def test_lexical_retrieval_scores_and_scopes_chunks(self):
+        chunk_a = SimpleNamespace(
+            id=101,
+            doc_id=10,
+            text="Ставка НДС составляет 20 процентов для операций.",
+            page=1,
+            chunk_index=0,
+            section="Ставка НДС",
+        )
+        chunk_b = SimpleNamespace(
+            id=102,
+            doc_id=10,
+            text="Общие положения без конкретной ставки.",
+            page=2,
+            chunk_index=1,
+            section="Общие положения",
+        )
+        chunk_c = SimpleNamespace(
+            id=103,
+            doc_id=11,
+            text="Ставка налога на прибыль описана отдельно.",
+            page=1,
+            chunk_index=0,
+            section="Прибыль",
+        )
+        doc_a = SimpleNamespace(id=10, name="nds.txt")
+        doc_b = SimpleNamespace(id=11, name="profit.txt")
+        result = SimpleNamespace(
+            all=lambda: [(chunk_a, doc_a), (chunk_b, doc_a), (chunk_c, doc_b)]
+        )
+        session = SimpleNamespace(exec=AsyncMock(return_value=result))
+
+        ranked = await _lexical_retrieve_chunks(
+            session=session,
+            query_text="какая ставка ндс 20 процентов",
+            allowed_doc_ids={10},
+            retrieval_top_k=5,
+        )
+
+        self.assertEqual([item["chunk_id"] for item in ranked], ["101"])
+        self.assertEqual(ranked[0]["metadata"]["doc_name"], "nds.txt")
+        self.assertGreater(ranked[0]["lexical_score"], 0.0)
 
 
 if __name__ == "__main__":

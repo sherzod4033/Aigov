@@ -1,3 +1,4 @@
+import re
 from typing import Dict, List
 
 from app.core.exceptions import ExternalServiceError
@@ -9,6 +10,20 @@ from app.modules.rag.text_utils import sanitize_answer_text
 class GenerationService:
     def __init__(self) -> None:
         self.model_manager = ModelManager()
+
+    @staticmethod
+    def _fallback_from_context(context: List[str], no_data_answer: str) -> str:
+        sentences: list[str] = []
+        for chunk in context:
+            for sentence in re.split(r"(?<=[.!?])\s+|\n+", chunk or ""):
+                cleaned = " ".join(sentence.split()).strip()
+                if cleaned:
+                    sentences.append(cleaned)
+            if len(sentences) >= 2:
+                break
+        if not sentences:
+            return no_data_answer
+        return " ".join(sentences[:2]).strip()
 
     async def condense_query(
         self,
@@ -100,4 +115,7 @@ class GenerationService:
                     cause=exc,
                 ) from exc
 
-        return sanitize_answer_text(draft_answer)
+        answer = sanitize_answer_text(draft_answer)
+        if not answer:
+            return self._fallback_from_context(context, no_data_answer)
+        return answer

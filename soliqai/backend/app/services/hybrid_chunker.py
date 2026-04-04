@@ -71,8 +71,8 @@ _HEADING_PATTERNS = [
     re.compile(r"^\d+(?:\.\d+)+\s+\S+"),
     # Roman numerals: "IV. Заголовок"
     re.compile(r"^[IVXLCDM]+\.\s+\S+"),
-    # Short uppercase line without trailing period (likely a heading)
-    re.compile(r"^[A-ZА-ЯЁӮҚҲҶҒa-zа-яёӯқҳҷғ\s\d\-]{3,80}$"),
+    # Short ALL-CAPS line without trailing period (likely a heading)
+    re.compile(r"^[A-ZА-ЯЁӮҚҲҶҒ\s\d\-]{3,80}$"),
 ]
 
 # List item patterns

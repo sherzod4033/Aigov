@@ -12,6 +12,7 @@ class RuntimeSettingsService:
     DEFAULTS: dict[str, Any] = {
         "chat_model": settings.OLLAMA_MODEL_CHAT,
         "embedding_model": settings.OLLAMA_MODEL_EMBEDDING,
+        "retrieval_top_k": 20,
         "top_k": 5,
         "default_domain_profile": "tax",
     }
@@ -67,6 +68,9 @@ class RuntimeSettingsService:
         legacy_model = str(merged.get("model") or "").strip()
         merged["chat_model"] = str(merged.get("chat_model") or legacy_model).strip()
         merged["embedding_model"] = str(merged.get("embedding_model") or "").strip()
+        merged["retrieval_top_k"] = cls._normalize_retrieval_top_k(
+            merged.get("retrieval_top_k")
+        )
         merged["top_k"] = cls._normalize_top_k(merged.get("top_k"))
         if not merged["chat_model"]:
             merged["chat_model"] = cls.DEFAULTS["chat_model"]
@@ -99,6 +103,10 @@ class RuntimeSettingsService:
             if embedding_model not in cls.model_catalog()["available_embedding_models"]:
                 raise ValueError(f"Unsupported embedding model: {embedding_model}")
             current["embedding_model"] = embedding_model
+        if "retrieval_top_k" in patch:
+            current["retrieval_top_k"] = cls._normalize_retrieval_top_k(
+                patch["retrieval_top_k"]
+            )
         if "top_k" in patch:
             current["top_k"] = cls._normalize_top_k(patch["top_k"])
         if "default_domain_profile" in patch:
@@ -119,6 +127,14 @@ class RuntimeSettingsService:
         except (TypeError, ValueError):
             return 5
         return max(1, min(number, 20))
+
+    @staticmethod
+    def _normalize_retrieval_top_k(value: Any) -> int:
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            return 20
+        return max(1, min(number, 50))
 
     @staticmethod
     def _normalize_domain_profile(value: Any) -> str:

@@ -107,7 +107,7 @@ class DocumentService:
         if not blocks:
             return []
         if chunker is None:
-            chunker = HybridChunker()
+            chunker = HybridChunker(overlap_tokens=60)
         return chunker.chunk(blocks)
 
     # ------------------------------------------------------------------
