@@ -1,6 +1,6 @@
 import re
 
-from app.modules.rag.constants import (
+from app.modules.rag.chunker_config import (
     REASONING_MARKERS,
     RU_TJ_STOPWORDS,
     TAJIK_TO_RU_HINTS,
@@ -158,10 +158,10 @@ def detect_article_reference(query: str) -> str | None:
 def boost_article_chunks(results: dict, article_ref: str) -> dict:
     if not results.get("documents") or not results["documents"][0]:
         return results
-    docs = results["documents"][0]
-    ids = results["ids"][0]
-    metas = results["metadatas"][0]
-    dists = results["distances"][0]
+    docs = list(results["documents"][0])
+    ids = list(results["ids"][0])
+    metas = list(results["metadatas"][0])
+    dists = list(results["distances"][0])
     ref_lower = article_ref.lower()
     article_number = re.search(r"\d+", article_ref)
     number_str = article_number.group(0) if article_number else ""
@@ -183,10 +183,12 @@ def boost_article_chunks(results: dict, article_ref: str) -> dict:
     reordered = boosted + normal
     if not reordered:
         return results
-    results["documents"] = [[e[0] for e in reordered]]
-    results["ids"] = [[e[1] for e in reordered]]
-    results["metadatas"] = [[e[2] for e in reordered]]
-    results["distances"] = [
-        [e[3] * 0.5 if i < len(boosted) else e[3] for i, e in enumerate(reordered)]
-    ]
-    return results
+    return {
+        **results,
+        "documents": [[e[0] for e in reordered]],
+        "ids": [[e[1] for e in reordered]],
+        "metadatas": [[e[2] for e in reordered]],
+        "distances": [
+            [e[3] * 0.5 if i < len(boosted) else e[3] for i, e in enumerate(reordered)]
+        ],
+    }

@@ -368,18 +368,23 @@ const AdminDocumentsPage = ({ notebookId }) => {
                             Выбрать файл
                             <input
                                 type="file"
+                                multiple
                                 className="hidden"
                                 accept=".pdf,.docx,.txt,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                                 {...register('file')}
                                 onChange={(e) => {
-                                    const file = e.target.files?.[0];
-                                    if (file) {
+                                    const files = Array.from(e.target.files || []);
+                                    const valid = [];
+                                    for (const file of files) {
                                         if (validateFile(file)) {
-                                            setDraggedFiles([file]);
-                                            setUploadError('');
-                                        } else {
-                                            setUploadError('Разрешенные форматы: PDF, DOCX, TXT');
+                                            valid.push(file);
                                         }
+                                    }
+                                    if (valid.length > 0) {
+                                        setDraggedFiles(valid);
+                                        setUploadError('');
+                                    } else if (files.length > 0) {
+                                        setUploadError('Разрешенные форматы: PDF, DOCX, TXT');
                                     }
                                 }}
                             />
@@ -395,6 +400,8 @@ const AdminDocumentsPage = ({ notebookId }) => {
                                     <Loader2 className="h-4 w-4 animate-spin" />
                                     Загрузка...
                                 </>
+                            ) : draggedFiles.length > 1 ? (
+                                `Загрузить ${draggedFiles.length} файлов`
                             ) : (
                                 'Загрузить файл'
                             )}

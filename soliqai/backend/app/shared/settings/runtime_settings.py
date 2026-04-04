@@ -3,8 +3,6 @@ from pathlib import Path
 from typing import Any
 
 from app.core.exceptions import ExternalServiceError
-from app.domain_profiles import list_domain_profiles
-from app.modules.rag.model_manager import ModelManager
 from app.shared.settings.config import settings
 
 
@@ -35,7 +33,9 @@ class RuntimeSettingsService:
         candidates: list[str] = []
 
         try:
-            candidates.extend(ModelManager().list_ollama_models())
+            candidates.extend(
+                __import__("app.modules.rag.model_manager", fromlist=["ModelManager"]).ModelManager().list_ollama_models()
+            )
         except ExternalServiceError as exc:
             ollama_available = False
             ollama_error = exc.message
@@ -102,7 +102,17 @@ class RuntimeSettingsService:
                 raise ValueError("Embedding model must not be empty")
             if embedding_model not in cls.model_catalog()["available_embedding_models"]:
                 raise ValueError(f"Unsupported embedding model: {embedding_model}")
+            old_embedding = current.get("embedding_model", "")
             current["embedding_model"] = embedding_model
+            if old_embedding and old_embedding != embedding_model:
+                current["reindex_required"] = True
+                import logging
+                logging.getLogger(__name__).warning(
+                    "Embedding model changed from %s to %s — reindex required. "
+                    "Run reindex_documents.py to rebuild the vector store.",
+                    old_embedding,
+                    embedding_model,
+                )
         if "retrieval_top_k" in patch:
             current["retrieval_top_k"] = cls._normalize_retrieval_top_k(
                 patch["retrieval_top_k"]
@@ -139,7 +149,8 @@ class RuntimeSettingsService:
     @staticmethod
     def _normalize_domain_profile(value: Any) -> str:
         profile = str(value or "").strip().lower()
-        available = set(list_domain_profiles())
+        from app.domain_profiles import list_domain_profiles as _list_profiles
+        available = set(_list_profiles())
         return profile if profile in available else "tax"
 
     @staticmethod

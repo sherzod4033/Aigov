@@ -61,7 +61,7 @@ class OllamaEmbeddingFunction:
 
 
 class ChromaGateway:
-    ADD_BATCH_SIZE = 8
+    ADD_BATCH_SIZE = 20
 
     def __init__(self) -> None:
         from app.shared.settings.runtime_settings import RuntimeSettingsService
@@ -116,6 +116,12 @@ class ChromaGateway:
                 self.chroma_client = client
                 self.collection = collection
                 self.chroma_error = None
+                if collection.count() == 0:
+                    logger.warning(
+                        "ChromaDB collection '%s' is empty. "
+                        "If the embedding model was recently changed, run reindex_documents.py.",
+                        collection_name,
+                    )
                 return
             except Exception as exc:
                 last_error = exc

@@ -5,7 +5,9 @@ Usage: python reindex_documents.py
 """
 
 import asyncio
+import json
 import os
+import re
 import sys
 from sqlmodel import select
 from sqlalchemy.orm import sessionmaker
@@ -21,6 +23,29 @@ from app.services.hybrid_chunker import HybridChunker
 from app.services.rag_service import RAGService
 
 
+def _build_embedding_text(chunk_text, doc_name, page=None, section_json=None):
+    parts = []
+    clean_name = re.sub(r'\.[a-zA-Z0-9]+$', '', doc_name or '').strip()
+    if clean_name:
+        parts.append(clean_name)
+    if section_json:
+        try:
+            sections = json.loads(section_json)
+            if isinstance(sections, list) and sections:
+                header = str(sections[-1]).strip()
+                if len(header) > 80:
+                    header = header[:80].rstrip() + '…'
+                if header:
+                    parts.append(header)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    if page is not None:
+        parts.append(f'стр. {page}')
+    if parts:
+        return f'[{" | ".join(parts)}] {chunk_text}'
+    return chunk_text
+
+
 async def reindex_all_documents():
     print("Starting re-indexing with HybridChunker pipeline...")
 
@@ -29,7 +54,20 @@ async def reindex_all_documents():
     )
 
     rag_service = RAGService()
-    chunker = HybridChunker()
+    from app.modules.rag.chunker_config import (
+        CHUNKER_TARGET_TOKENS,
+        CHUNKER_MAX_TOKENS,
+        CHUNKER_MIN_TOKENS,
+        CHUNKER_OVERLAP_TOKENS,
+        CHUNKER_MAX_CHARS,
+    )
+    chunker = HybridChunker(
+        target_tokens=CHUNKER_TARGET_TOKENS,
+        max_tokens=CHUNKER_MAX_TOKENS,
+        min_tokens=CHUNKER_MIN_TOKENS,
+        overlap_tokens=CHUNKER_OVERLAP_TOKENS,
+        max_chars=CHUNKER_MAX_CHARS,
+    )
 
     async with async_session() as session:
         result = await session.exec(select(Document))
@@ -98,14 +136,19 @@ async def reindex_all_documents():
                 await session.flush()
                 await session.refresh(chunk)
 
-                docs_text.append(chunk.text)
+                docs_text.append(_build_embedding_text(
+                    chunk.text, doc.name, chunk.page, chunk.section,
+                ))
                 ids.append(str(chunk.id))
-                metadatas.append({
+                metadata = {
                     "doc_id": doc.id,
                     "doc_name": doc.name,
                     "page": chunk.page,
                     "chunk_index": cr.chunk_index,
-                })
+                }
+                if chunk.section:
+                    metadata["section"] = chunk.section
+                metadatas.append(metadata)
 
             await session.commit()
 

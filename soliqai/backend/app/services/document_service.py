@@ -107,7 +107,20 @@ class DocumentService:
         if not blocks:
             return []
         if chunker is None:
-            chunker = HybridChunker(overlap_tokens=60)
+            from app.modules.rag.chunker_config import (
+                CHUNKER_TARGET_TOKENS,
+                CHUNKER_MAX_TOKENS,
+                CHUNKER_MIN_TOKENS,
+                CHUNKER_OVERLAP_TOKENS,
+                CHUNKER_MAX_CHARS,
+            )
+            chunker = HybridChunker(
+                target_tokens=CHUNKER_TARGET_TOKENS,
+                max_tokens=CHUNKER_MAX_TOKENS,
+                min_tokens=CHUNKER_MIN_TOKENS,
+                overlap_tokens=CHUNKER_OVERLAP_TOKENS,
+                max_chars=CHUNKER_MAX_CHARS,
+            )
         return chunker.chunk(blocks)
 
     # ------------------------------------------------------------------

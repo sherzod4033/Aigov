@@ -1,10 +1,33 @@
 import re
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from app.core.exceptions import ExternalServiceError
 from app.modules.rag.constants import DEFAULT_CHAT_MODEL
 from app.modules.rag.model_manager import ModelManager
 from app.modules.rag.text_utils import sanitize_answer_text
+
+
+def format_context_for_llm(
+    context: List[str],
+    context_metadata: List[Dict[str, Any]] | None = None,
+) -> str:
+    """Format context chunks with source metadata for the LLM prompt."""
+    if not context:
+        return ""
+    if not context_metadata or len(context_metadata) != len(context):
+        return "\n\n---\n\n".join(context)
+    parts: list[str] = []
+    for text, meta in zip(context, context_metadata):
+        doc_name = meta.get("doc_name") or ""
+        page = meta.get("page")
+        header_parts = []
+        if doc_name:
+            header_parts.append(doc_name)
+        if page is not None:
+            header_parts.append(f"стр. {page}")
+        header = f"[Источник: {', '.join(header_parts)}]" if header_parts else ""
+        parts.append(f"{header}\n{text}" if header else text)
+    return "\n\n---\n\n".join(parts)
 
 
 class GenerationService:
@@ -39,9 +62,13 @@ class GenerationService:
             history_str += f"{role}: {msg['content']}\n"
         prompt = (
             "Given the following conversation and a follow-up question, rephrase the follow-up question "
-            "to be a standalone search query that contains all necessary keywords from the context.\n"
-            "Rules:\n1) Keep it concise (max 10 words).\n2) Just return the refined query, no explanations.\n"
-            "3) If the question is already standalone, return it as is.\n\n"
+            "to be a standalone search query that contains all necessary context.\n\n"
+            "Rules:\n"
+            "1) Explicitly replace all pronouns (he, it, they, this) and list references "
+            '(e.g., "the first", "the third") with the exact and full entity names from the chat history.\n'
+            "2) Output the standalone query in the EXACT same language as the user's follow-up question (e.g., Russian).\n"
+            "3) Just return the refined query, no explanations, no quotes.\n"
+            "4) If the question is already standalone, return it as is without changes.\n\n"
             f"Chat History:\n{history_str}\nFollow-up Question: {query}\nStandalone Query:"
         )
         try:
@@ -64,9 +91,10 @@ class GenerationService:
         assistant_name: str = "KnowledgeAI",
         answer_rules: str | None = None,
         no_data_answer: str | None = None,
+        context_metadata: List[Dict[str, Any]] | None = None,
     ) -> str:
         resolved_model = self.model_manager.resolve_chat_model(model)
-        context_str = "\n\n".join(context)
+        context_str = format_context_for_llm(context, context_metadata)
         no_data_answer = no_data_answer or (
             "Маълумот дар манбаъҳои интихобшуда мавҷуд нест / Ответ не найден в выбранных источниках"
             if language == "tj"
@@ -81,13 +109,25 @@ class GenerationService:
             for msg in chat_history[-3:]:
                 role = "User" if msg["role"] == "user" else "AI"
                 history_str += f"{role}: {msg['content']}\n"
-        prompt = (
-            f"You are {assistant_name}. Answer the user question based on the provided context and history.\n"
-            f"Rules:\n1) {answer_rules}\n2) Adaptive Style: You can adapt the explanation style if the user asks, but do not invent facts.\n"
-            f'3) If the context does not contain the answer to the core question, respond exactly with: "{no_data_answer}".\n'
-            "4) Maintain conversation flow using chat history.\n\n"
-            f"History:\n{history_str or 'No history'}\n\nContext:\n{context_str}\n\nQuestion: {query}\nAnswer:"
-        )
+
+        if language == "tj":
+            prompt = (
+                f"Шумо {assistant_name} ҳастед. Ба савол дар асоси контекст ва таърих ҷавоб диҳед.\n"
+                f"Қоидаҳо:\n1) {answer_rules}\n"
+                f"2) Шумо метавонед услуби шарҳро мутобиқ созед, аммо далелҳо наофаред.\n"
+                f'3) Агар контекст ҷавоб надошта бошад, айнан бинависед: "{no_data_answer}".\n'
+                f"4) Таърихи суҳбатро риоя кунед.\n\n"
+                f"Таърих:\n{history_str or 'Таърих нест'}\n\nКонтекст:\n{context_str}\n\nСавол: {query}\nҶавоб:"
+            )
+        else:
+            prompt = (
+                f"Вы — {assistant_name}. Отвечайте на вопрос пользователя на основе предоставленного контекста и истории.\n"
+                f"Правила:\n1) {answer_rules}\n"
+                f"2) Адаптивный стиль: вы можете менять стиль объяснения по просьбе, но не выдумывайте факты.\n"
+                f'3) Если контекст не содержит ответа на вопрос, ответьте точно: "{no_data_answer}".\n'
+                f"4) Поддерживайте поток беседы, используя историю.\n\n"
+                f"История:\n{history_str or 'Нет истории'}\n\nКонтекст:\n{context_str}\n\nВопрос: {query}\nОтвет:"
+            )
         try:
             draft_answer = await self.model_manager.chat(
                 model=resolved_model,

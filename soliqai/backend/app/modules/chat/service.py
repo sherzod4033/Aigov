@@ -3,7 +3,7 @@ import logging
 import math
 import re
 from collections import Counter
-from time import perf_counter
+from time import perf_counter, time as time_now
 from typing import Any
 
 from sqlmodel import select
@@ -28,6 +28,33 @@ logger = logging.getLogger(__name__)
 LEXICAL_BM25_K1 = 1.5
 LEXICAL_BM25_B = 0.75
 RRF_K = 60
+
+# TTL cache for hybrid retrieval results (notebook_id, query) → results
+_RETRIEVAL_CACHE: dict[str, tuple[float, dict[str, list[dict[str, Any]]]]] = {}
+_RETRIEVAL_CACHE_TTL = 300  # 5 minutes
+_RETRIEVAL_CACHE_MAX_SIZE = 200
+
+
+def _retrieval_cache_key(notebook_id: int | None, query: str) -> str:
+    return f"{notebook_id or 0}:{RAGService.normalize_query(query)}"
+
+
+def _retrieval_cache_get(key: str) -> dict[str, list[dict[str, Any]]] | None:
+    entry = _RETRIEVAL_CACHE.get(key)
+    if entry is None:
+        return None
+    ts, result = entry
+    if time_now() - ts > _RETRIEVAL_CACHE_TTL:
+        _RETRIEVAL_CACHE.pop(key, None)
+        return None
+    return result
+
+
+def _retrieval_cache_put(key: str, result: dict[str, list[dict[str, Any]]]) -> None:
+    if len(_RETRIEVAL_CACHE) >= _RETRIEVAL_CACHE_MAX_SIZE:
+        oldest_key = min(_RETRIEVAL_CACHE, key=lambda k: _RETRIEVAL_CACHE[k][0])
+        _RETRIEVAL_CACHE.pop(oldest_key, None)
+    _RETRIEVAL_CACHE[key] = (time_now(), result)
 
 
 def safe_float(value: Any) -> float | None:
@@ -257,8 +284,26 @@ async def lexical_retrieve_chunks(
     allowed_doc_ids: set[int] | None,
     retrieval_top_k: int,
 ) -> list[dict[str, Any]]:
-    query_tokens = RAGService._query_tokens(query_text)
-    if not query_tokens:
+    return await lexical_retrieve_chunks_batch(
+        session=session,
+        query_texts=[query_text],
+        allowed_doc_ids=allowed_doc_ids,
+        retrieval_top_k=retrieval_top_k,
+    )
+
+
+async def lexical_retrieve_chunks_batch(
+    *,
+    session: AsyncSession,
+    query_texts: list[str],
+    allowed_doc_ids: set[int] | None,
+    retrieval_top_k: int,
+) -> list[dict[str, Any]]:
+    """BM25 retrieval with merged tokens from multiple query variants (single DB pass)."""
+    merged_query_tokens: set[str] = set()
+    for qt in query_texts:
+        merged_query_tokens.update(RAGService._query_tokens(qt))
+    if not merged_query_tokens:
         return []
     if allowed_doc_ids is not None and not allowed_doc_ids:
         return []
@@ -271,9 +316,18 @@ async def lexical_retrieve_chunks(
     if not rows:
         return []
 
-    normalized_query = RAGService.normalize_query(query_text)
-    article_ref = RAGService._detect_article_reference(normalized_query)
-    query_years = set(re.findall(r"\b(?:19|20)\d{2}\b", query_text))
+    # Merge article refs, years, normalized queries from all query variants
+    article_refs: set[str] = set()
+    query_years: set[str] = set()
+    normalized_queries: list[str] = []
+    for qt in query_texts:
+        nq = RAGService.normalize_query(qt)
+        normalized_queries.append(nq)
+        ref = RAGService._detect_article_reference(nq)
+        if ref:
+            article_refs.add(ref)
+        query_years.update(re.findall(r"\b(?:19|20)\d{2}\b", qt))
+
     chunk_records: list[dict[str, Any]] = []
     doc_frequency: Counter[str] = Counter()
     total_length = 0
@@ -289,7 +343,7 @@ async def lexical_retrieve_chunks(
         corpus_size += 1
         total_length += len(token_list)
         token_counts = Counter(token_list)
-        overlap = [token for token in query_tokens if token_counts.get(token)]
+        overlap = [token for token in merged_query_tokens if token_counts.get(token)]
         for token in set(overlap):
             doc_frequency[token] += 1
         if not overlap:
@@ -315,7 +369,7 @@ async def lexical_retrieve_chunks(
         token_counts: Counter[str] = record["token_counts"]
         chunk_length = record["chunk_length"]
         score = 0.0
-        for token in query_tokens:
+        for token in merged_query_tokens:
             term_frequency = token_counts.get(token, 0)
             if term_frequency <= 0:
                 continue
@@ -329,9 +383,11 @@ async def lexical_retrieve_chunks(
             score += idf * ((term_frequency * (LEXICAL_BM25_K1 + 1.0)) / denominator)
 
         normalized_text = RAGService.normalize_query(chunk.text)
-        if normalized_query and normalized_query in normalized_text:
+        # Boost for exact phrase match in any query variant
+        if any(nq and nq in normalized_text for nq in normalized_queries):
             score += 0.25
-        if article_ref and article_ref in normalized_text:
+        # Boost for article references
+        if any(ref in normalized_text for ref in article_refs):
             score += 0.35
         if query_years and any(year in (document.name or "") for year in query_years):
             score += 0.3
@@ -558,7 +614,7 @@ def _score_retrieval_candidate(
         and any(year in (metadata.get("doc_name") or "") for year in query_years)
         else 0.0
     )
-    distance_score = 0.15 if distance is None else 1.0 / (1.0 + max(distance, 0.0))
+    distance_score = 0.5 if distance is None else 1.0 / (1.0 + max(distance, 0.0))
 
     return round(
         (distance_score * 0.45)
@@ -583,6 +639,7 @@ async def run_retrieval(
     retrieval_top_k: int,
     final_top_k: int,
     original_query: str | None = None,
+    notebook_id: int | None = None,
 ) -> list[dict[str, Any]]:
     retrieval_result = await run_hybrid_retrieval(
         rag_service=rag_service,
@@ -594,6 +651,7 @@ async def run_retrieval(
         allowed_doc_ids=allowed_doc_ids,
         retrieval_top_k=retrieval_top_k,
         final_top_k=final_top_k,
+        notebook_id=notebook_id,
     )
     return retrieval_result["final_chunks"]
 
@@ -609,17 +667,19 @@ async def run_hybrid_retrieval(
     allowed_doc_ids: set[int] | None,
     retrieval_top_k: int,
     final_top_k: int,
+    notebook_id: int | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
+    # Check cache
+    cache_key = _retrieval_cache_key(notebook_id, search_query)
+    cached = _retrieval_cache_get(cache_key)
+    if cached is not None:
+        logger.debug("Retrieval cache hit for: %s", search_query)
+        return cached
+
     pooled_vector_candidates: list[dict[str, Any]] = []
-    pooled_lexical_candidates: list[dict[str, Any]] = []
-    search_queries: list[str] = []
-    for candidate in [original_query, search_query]:
-        if candidate and candidate not in search_queries:
-            search_queries.append(candidate)
-    for candidate in list(search_queries):
-        for expanded in profile.search_queries(candidate, language):
-            if expanded and expanded not in search_queries:
-                search_queries.append(expanded)
+    search_queries: list[str] = [search_query] if search_query else []
+
+    # Vector retrieval: still per-query (different embeddings)
     for candidate_query in search_queries:
         logger.debug(
             "Querying ChromaDB with: %s, retrieval_top_k=%s",
@@ -644,14 +704,14 @@ async def run_hybrid_retrieval(
         for item in query_candidates:
             item["retrieval_method"] = "vector"
         pooled_vector_candidates.extend(query_candidates)
-        pooled_lexical_candidates.extend(
-            await lexical_retrieve_chunks(
-                session=session,
-                query_text=candidate_query,
-                allowed_doc_ids=allowed_doc_ids,
-                retrieval_top_k=retrieval_top_k,
-            )
-        )
+
+    # Lexical retrieval: single pass with merged tokens from all query variants
+    pooled_lexical_candidates = await lexical_retrieve_chunks_batch(
+        session=session,
+        query_texts=search_queries,
+        allowed_doc_ids=allowed_doc_ids,
+        retrieval_top_k=retrieval_top_k,
+    )
 
     vector_candidates = rank_vector_candidates(pooled_vector_candidates)[
         :retrieval_top_k
@@ -666,12 +726,17 @@ async def run_hybrid_retrieval(
         query_text=search_query,
         final_top_k=final_top_k,
     )
-    return {
+    result = {
         "vector_candidates": vector_candidates,
         "lexical_candidates": lexical_candidates,
         "fused_candidates": fused_candidates,
         "final_chunks": final_chunks,
     }
+
+    # Store in cache
+    _retrieval_cache_put(cache_key, result)
+
+    return result
 
 
 async def retrieve_year_targeted_chunks(
@@ -814,6 +879,7 @@ async def retrieve_chunks(
         allowed_doc_ids=allowed_doc_ids,
         retrieval_top_k=retrieval_top_k,
         final_top_k=final_top_k,
+        notebook_id=notebook.id if notebook else None,
     )
     selected_chunks = retrieval_result["final_chunks"]
 
@@ -993,6 +1059,7 @@ async def chat_request(
         allowed_doc_ids=allowed_doc_ids,
         retrieval_top_k=retrieval_top_k,
         final_top_k=top_k,
+        notebook_id=notebook.id if notebook else None,
     )
 
     if not selected_chunks:
@@ -1032,6 +1099,9 @@ async def chat_request(
     sources: list[SourceItem] = []
     expanded_context = await expand_with_neighbors(selected_chunks, session)
     filtered_context: list[str] = list(expanded_context)
+    context_metadata: list[dict[str, Any]] = [
+        {} for _ in expanded_context
+    ]
     for item in selected_chunks:
         chunk_text = item["text"]
         meta = item["metadata"]
@@ -1044,6 +1114,7 @@ async def chat_request(
             quote = quote[:240].rstrip() + "..."
         if chunk_text not in filtered_context:
             filtered_context.append(chunk_text)
+            context_metadata.append({"doc_name": doc_name, "page": page})
         sources.append(
             SourceItem(
                 source_type="source",
@@ -1064,67 +1135,8 @@ async def chat_request(
         assistant_name=profile.assistant_name,
         answer_rules=profile.answer_rules(language),
         no_data_answer=no_data_answer,
+        context_metadata=context_metadata,
     )
-    if is_no_data_answer(answer):
-        fallback_chunks = await retrieve_year_targeted_chunks(
-            session=session,
-            question=chat_request.question,
-            allowed_doc_ids=allowed_doc_ids,
-            final_top_k=top_k,
-        )
-        if fallback_chunks:
-            fallback_doc_ids = {
-                item["metadata"].get("doc_id")
-                for item in fallback_chunks
-                if item["metadata"].get("doc_id") is not None
-            }
-            fallback_doc_name_map: dict[int, str] = {}
-            if fallback_doc_ids:
-                docs_result = await session.exec(
-                    select(Document).where(Document.id.in_(fallback_doc_ids))
-                )
-                for doc in docs_result.all():
-                    fallback_doc_name_map[doc.id] = doc.name
-
-            fallback_sources: list[SourceItem] = []
-            fallback_context = await expand_with_neighbors(fallback_chunks, session)
-            fallback_filtered_context: list[str] = list(fallback_context)
-            for item in fallback_chunks:
-                chunk_text = item["text"]
-                meta = item["metadata"]
-                doc_id = meta.get("doc_id")
-                doc_name = meta.get("doc_name") or fallback_doc_name_map.get(doc_id)
-                page = meta.get("page")
-                chunk_id = item["chunk_id"]
-                quote = (chunk_text or "").strip().replace("\n", " ")
-                if len(quote) > 240:
-                    quote = quote[:240].rstrip() + "..."
-                if chunk_text not in fallback_filtered_context:
-                    fallback_filtered_context.append(chunk_text)
-                fallback_sources.append(
-                    SourceItem(
-                        source_type="source",
-                        doc_id=doc_id,
-                        doc_name=doc_name,
-                        page=page,
-                        chunk_id=chunk_id,
-                        quote=quote or None,
-                    )
-                )
-
-            fallback_answer = await rag_service.generate_answer(
-                query=normalized_question,
-                context=fallback_filtered_context,
-                chat_history=chat_history,
-                language=language,
-                model=model,
-                assistant_name=profile.assistant_name,
-                answer_rules=profile.answer_rules(language),
-                no_data_answer=no_data_answer,
-            )
-            if not is_no_data_answer(fallback_answer):
-                answer = fallback_answer
-                sources = fallback_sources
     if is_no_data_answer(answer):
         sources = []
     log_entry = Log(

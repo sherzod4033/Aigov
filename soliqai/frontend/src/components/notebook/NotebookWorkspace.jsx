@@ -60,7 +60,7 @@ const getNotebookLabel = (source, notebookNameById) => {
 };
 
 /* ── Split-dropdown button (like Google NotebookLM) ─────────────────────── */
-const AddSourceSplitButton = ({ onUpload, onExisting, isLoading }) => {
+const AddSourceSplitButton = ({ onUpload, onExisting, isLoading, uploadProgress }) => {
   const [open, setOpen] = useState(false);
   const containerRef = useRef(null);
 
@@ -90,7 +90,7 @@ const AddSourceSplitButton = ({ onUpload, onExisting, isLoading }) => {
         ) : (
           <Plus className="h-4 w-4" />
         )}
-        Добавить источник
+        {isLoading && uploadProgress ? `Загрузка ${uploadProgress}` : 'Добавить источник'}
       </button>
 
       {/* Divider */}
@@ -237,6 +237,7 @@ const NotebookWorkspace = ({ notebookId }) => {
   const [sourcesLoading, setSourcesLoading] = useState(true);
   const [sourcesError, setSourcesError] = useState('');
   const [uploadingSource, setUploadingSource] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState('');  // e.g. "2 / 5"
   const [sourceSheetOpen, setSourceSheetOpen] = useState(false);
   const [sourceSheetMode, setSourceSheetMode] = useState('actions');
   const [sourceSearch, setSourceSearch] = useState('');
@@ -408,25 +409,34 @@ const NotebookWorkspace = ({ notebookId }) => {
   };
 
   const handleSourceUpload = async (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(event.target.files || []);
+    if (files.length === 0) return;
 
-    try {
-      setUploadingSource(true);
-      setSourcesError('');
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('notebook_id', String(currentNotebookId));
-      const response = await sourcesService.upload(formData);
-      setSources((prev) => [response.data, ...prev]);
-      setSourcesCollapsed(false);
-    } catch (error) {
-      console.error('Failed to upload source', error);
-      setSourcesError(error.response?.data?.detail || 'Не удалось добавить источник.');
-    } finally {
-      setUploadingSource(false);
-      event.target.value = '';
+    setUploadingSource(true);
+    setSourcesError('');
+    const errors = [];
+
+    for (let i = 0; i < files.length; i++) {
+      setUploadProgress(`${i + 1} / ${files.length}`);
+      try {
+        const formData = new FormData();
+        formData.append('file', files[i]);
+        formData.append('notebook_id', String(currentNotebookId));
+        const response = await sourcesService.upload(formData);
+        setSources((prev) => [response.data, ...prev]);
+        setSourcesCollapsed(false);
+      } catch (error) {
+        console.error(`Failed to upload ${files[i].name}`, error);
+        errors.push(files[i].name);
+      }
     }
+
+    if (errors.length > 0) {
+      setSourcesError(`Не удалось загрузить: ${errors.join(', ')}`);
+    }
+    setUploadingSource(false);
+    setUploadProgress('');
+    event.target.value = '';
   };
 
   const handleAttachExistingSources = async () => {
@@ -478,7 +488,7 @@ const NotebookWorkspace = ({ notebookId }) => {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
-      <input ref={sourceInputRef} type="file" className="hidden" onChange={handleSourceUpload} />
+      <input ref={sourceInputRef} type="file" className="hidden" multiple accept=".pdf,.docx,.txt" onChange={handleSourceUpload} />
 
       <div className="overflow-x-auto pb-1">
         <div className="flex min-h-0 min-w-[940px] gap-4">
@@ -492,6 +502,7 @@ const NotebookWorkspace = ({ notebookId }) => {
                 onUpload={handleUploadSourceClick}
                 onExisting={handleOpenExistingSources}
                 isLoading={uploadingSource}
+                uploadProgress={uploadProgress}
               />
             )}
             footerLink={{ to: `/notebooks/${notebookId}/sources`, label: 'Открыть все источники' }}

@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Outlet, useParams } from 'react-router-dom';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Outlet, useNavigate, useParams } from 'react-router-dom';
 
 import { useNotebookHeader } from '../components/layout/NotebookHeaderContext';
 import { notebooksService } from '../services/notebooksService';
@@ -45,10 +45,12 @@ const resolveLatestNotebookActivity = (notebook, sources, notes) => {
 
 const NotebookLayout = () => {
   const { notebookId } = useParams();
+  const navigate = useNavigate();
   const [notebook, setNotebook] = useState(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
+  const [deleting, setDeleting] = useState(false);
   const { setNotebookHeader, setNotebookActions } = useNotebookHeader();
 
   useEffect(() => {
@@ -128,20 +130,35 @@ const NotebookLayout = () => {
     };
   }, [notebook, notebookId, lastUpdatedAt, setNotebookHeader]);
 
+  const handleDeleteNotebook = useCallback(async () => {
+    if (!notebookId) return;
+    if (!window.confirm('Удалить блокнот и все его источники, заметки и историю чата?')) return;
+    try {
+      setDeleting(true);
+      await notebooksService.delete(notebookId);
+      navigate('/notebooks', { replace: true });
+    } catch (deleteError) {
+      console.error('Failed to delete notebook', deleteError);
+      alert(deleteError.response?.data?.detail || 'Не удалось удалить блокнот.');
+    } finally {
+      setDeleting(false);
+    }
+  }, [notebookId, navigate]);
+
   useEffect(() => {
     setNotebookActions({
       onArchive: undefined,
-      onDelete: undefined,
+      onDelete: handleDeleteNotebook,
       archiveDisabled: true,
-      deleteDisabled: true,
-      archiveTitle: 'Архивация пока не поддерживается API',
-      deleteTitle: 'Удаление пока не поддерживается API',
+      deleteDisabled: deleting,
+      archiveTitle: 'Архивация пока не поддерживается',
+      deleteTitle: deleting ? 'Удаление...' : 'Удалить блокнот',
     });
 
     return () => {
       setNotebookActions(null);
     };
-  }, [setNotebookActions]);
+  }, [setNotebookActions, handleDeleteNotebook, deleting]);
 
   return (
     <div className="flex h-full flex-col gap-6">

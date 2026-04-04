@@ -1,5 +1,7 @@
+import json
 import logging
 import os
+import re
 from typing import Any, Optional
 
 from fastapi import HTTPException, UploadFile
@@ -14,19 +16,65 @@ from app.modules.rag.service import RAGService
 
 logger = logging.getLogger(__name__)
 
+_YEAR_RE = re.compile(r'((?:19|20)\d{2})')
+
+
+def _build_embedding_text(
+    chunk_text: str,
+    doc_name: str,
+    page: int | None = None,
+    section_json: str | None = None,
+) -> str:
+    """Prepend contextual metadata to chunk text before embedding.
+
+    Result looks like:
+      [Обложка.pdf | Введение в финансовую науку | стр. 12] <chunk text>
+    """
+    parts: list[str] = []
+    # Clean doc name (remove extension for readability)
+    clean_name = re.sub(r'\.[a-zA-Z0-9]+$', '', doc_name or '').strip()
+    if clean_name:
+        parts.append(clean_name)
+
+    # Extract most specific section header
+    if section_json:
+        try:
+            sections = json.loads(section_json)
+            if isinstance(sections, list) and sections:
+                # Use last (most specific) section
+                header = str(sections[-1]).strip()
+                if len(header) > 80:
+                    header = header[:80].rstrip() + '…'
+                if header:
+                    parts.append(header)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    if page is not None:
+        parts.append(f'стр. {page}')
+
+    if parts:
+        prefix = ' | '.join(parts)
+        return f'[{prefix}] {chunk_text}'
+    return chunk_text
+
 
 class DocumentModuleService:
     @staticmethod
     def _build_ingestion_chunker() -> HybridChunker:
-        # mxbai-embed-large exposes a 512-token context window via Ollama.
-        # Use a conservative char cap because BERT-style tokenization is denser
-        # than our coarse len()/3.6 estimate on structured text and tables.
+        from app.modules.rag.chunker_config import (
+            CHUNKER_TARGET_TOKENS,
+            CHUNKER_MAX_TOKENS,
+            CHUNKER_MIN_TOKENS,
+            CHUNKER_OVERLAP_TOKENS,
+            CHUNKER_MAX_CHARS,
+        )
         return HybridChunker(
-            target_tokens=90,
-            max_tokens=180,
-            min_tokens=60,
-            max_chars=600,
-            overlap_tokens=30,
+            target_tokens=CHUNKER_TARGET_TOKENS,
+            max_tokens=CHUNKER_MAX_TOKENS,
+            min_tokens=CHUNKER_MIN_TOKENS,
+            overlap_tokens=CHUNKER_OVERLAP_TOKENS,
+            max_chars=CHUNKER_MAX_CHARS,
         )
 
     @staticmethod
@@ -85,7 +133,9 @@ class DocumentModuleService:
             )
             session.add(chunk)
             await session.flush()
-            docs_text.append(chunk.text)
+            docs_text.append(_build_embedding_text(
+                chunk.text, doc.name, chunk.page, chunk.section,
+            ))
             ids.append(str(chunk.id))
             metadata = {
                 "doc_id": doc.id,
@@ -93,6 +143,8 @@ class DocumentModuleService:
                 "page": chunk.page,
                 "chunk_index": cr.chunk_index,
             }
+            if chunk.section:
+                metadata["section"] = chunk.section
             if doc.notebook_id is not None:
                 metadata["notebook_id"] = doc.notebook_id
             metadatas.append(metadata)
@@ -266,7 +318,9 @@ class DocumentModuleService:
                     )
                     session.add(chunk)
                     await session.flush()
-                    docs_text.append(chunk.text)
+                    docs_text.append(_build_embedding_text(
+                        chunk.text, doc.name, chunk.page, chunk.section,
+                    ))
                     ids.append(str(chunk.id))
                     metadata = {
                         "doc_id": doc.id,
@@ -274,6 +328,8 @@ class DocumentModuleService:
                         "page": chunk.page,
                         "chunk_index": cr.chunk_index,
                     }
+                    if chunk.section:
+                        metadata["section"] = chunk.section
                     if doc.notebook_id is not None:
                         metadata["notebook_id"] = doc.notebook_id
                     metadatas.append(metadata)

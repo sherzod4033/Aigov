@@ -89,7 +89,8 @@ _LIST_PATTERN = re.compile(
 _TABLE_PATTERN = re.compile(r"(?:\|.*){2,}|(?:\t\S+){2,}")
 
 # Sentence boundary (for splitting oversized units)
-_SENTENCE_SPLIT = re.compile(r"(?<=[.!?։])\s+")
+# Negative lookbehind protects abbreviations: ст. гл. п. др. т. н.
+_SENTENCE_SPLIT = re.compile(r"(?<!ст)(?<!гл)(?<!др)(?<!\bп)(?<!\bт)(?<!\bн)(?<=[.!?։])\s+")
 
 # Page number pattern (standalone number on its own line)
 _PAGE_NUMBER = re.compile(r"^\s*\d{1,4}\s*$")
@@ -268,14 +269,14 @@ class HybridChunker:
             if pattern.match(first_line):
                 return "heading"
 
-        # Weak heading: short uppercase line without period
+        # Weak heading: short uppercase line without period (require at least 2 letters)
         if (
             len(lines) <= 2
             and len(first_line) <= 80
             and first_line == first_line.upper()
             and not first_line.endswith(".")
             and len(first_line) > 3
-            and any(c.isalpha() for c in first_line)
+            and sum(1 for c in first_line if c.isalpha()) >= 2
         ):
             return "heading"
 

@@ -103,6 +103,7 @@ async def handle_ask_request(
         allowed_doc_ids=allowed_doc_ids,
         retrieval_top_k=retrieval_top_k,
         final_top_k=top_k,
+        notebook_id=notebook.id if notebook else None,
     )
 
     if not selected_chunks:
@@ -136,6 +137,7 @@ async def handle_ask_request(
 
     expanded_context = await expand_with_neighbors(selected_chunks, session)
     filtered_context = list(expanded_context)
+    context_metadata: list[dict] = [{} for _ in expanded_context]
     citations: list[CitationItem] = []
     for item in selected_chunks:
         chunk_text = item["text"]
@@ -149,6 +151,7 @@ async def handle_ask_request(
             quote = quote[:240].rstrip() + "..."
         if chunk_text not in filtered_context:
             filtered_context.append(chunk_text)
+            context_metadata.append({"doc_name": source_name, "page": page})
         citations.append(
             CitationItem(
                 source_id=source_id,
@@ -168,6 +171,7 @@ async def handle_ask_request(
         assistant_name=profile.assistant_name,
         answer_rules=profile.answer_rules(language),
         no_data_answer=no_data_answer,
+        context_metadata=context_metadata,
     )
     if is_no_data_answer(answer):
         citations = []
