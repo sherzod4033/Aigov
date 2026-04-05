@@ -161,8 +161,10 @@ const NotebookLayout = () => {
   }, [setNotebookActions, handleDeleteNotebook, deleting]);
 
   return (
-    <div className="flex h-full flex-col gap-6">
-      <Outlet context={contextValue} />
+    <div className="flex h-full min-h-0 flex-col gap-6">
+      <div className="min-h-0 flex-1">
+        <Outlet context={contextValue} />
+      </div>
     </div>
   );
 };

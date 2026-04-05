@@ -10,6 +10,9 @@ export const sourcesService = {
   }),
   attachExisting: (payload) => api.post('/sources/attach', payload),
   delete: (id) => api.delete(`/sources/${id}`),
+  getPreviewBlob: (id) => api.get(`/sources/${id}/preview`, { responseType: 'blob' }),
+  getChunkContext: (docId, chunkId, neighbors = 2) =>
+    api.get(`/sources/${docId}/chunk/${chunkId}/context?neighbors=${neighbors}`),
 };
 
 

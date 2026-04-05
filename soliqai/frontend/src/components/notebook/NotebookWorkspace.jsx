@@ -149,7 +149,7 @@ const NotebookSidePanel = ({
   return (
     <section
       className={cn(
-        'relative flex h-[68vh] min-h-[540px] shrink-0 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm transition-[width] duration-300 ease-out',
+        'relative flex h-full shrink-0 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm transition-[width] duration-300 ease-out',
         collapsed ? 'w-11' : 'w-[19rem] xl:w-[21rem]',
       )}
     >
@@ -490,8 +490,8 @@ const NotebookWorkspace = ({ notebookId }) => {
     <div className="flex h-full min-h-0 flex-col gap-4">
       <input ref={sourceInputRef} type="file" className="hidden" multiple accept=".pdf,.docx,.txt" onChange={handleSourceUpload} />
 
-      <div className="overflow-x-auto pb-1">
-        <div className="flex min-h-0 min-w-[940px] gap-4">
+      <div className="min-h-0 flex-1 overflow-x-auto pb-1">
+        <div className="flex h-full min-w-[940px] gap-4">
           <NotebookSidePanel
             icon={FileText}
             title="Источники"
@@ -600,7 +600,7 @@ const NotebookWorkspace = ({ notebookId }) => {
             )}
           </NotebookSidePanel>
 
-          <section className="flex h-[68vh] min-h-[540px] min-w-[24rem] flex-1 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+          <section className="flex h-full min-w-0 flex-1 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
             <ChatPage notebookId={currentNotebookId} mode="notebookPanel" />
           </section>
         </div>

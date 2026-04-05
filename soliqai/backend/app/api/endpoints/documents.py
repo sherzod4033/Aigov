@@ -1,3 +1,4 @@
+import os
 from typing import Any, List, Optional
 from fastapi import (
     APIRouter,
@@ -7,7 +8,9 @@ from fastapi import (
     Query,
     UploadFile,
 )
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.api import deps
@@ -95,3 +98,88 @@ async def reindex_all_documents(
     session: AsyncSession = Depends(deps.get_session),
 ) -> Any:
     return await DocumentModuleService.reindex_all_documents(session=session)
+
+
+MIME_MAP = {
+    ".pdf": "application/pdf",
+    ".txt": "text/plain; charset=utf-8",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+
+
+@router.get("/{id}/preview")
+async def preview_document(
+    id: int,
+    session: AsyncSession = Depends(deps.get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> FileResponse:
+    doc = await session.get(Document, id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if not doc.path or not os.path.exists(doc.path):
+        raise HTTPException(status_code=404, detail="File not found on disk")
+    ext = os.path.splitext(doc.name or doc.path)[1].lower()
+    media_type = MIME_MAP.get(ext, "application/octet-stream")
+    return FileResponse(
+        doc.path,
+        media_type=media_type,
+        filename=doc.name,
+    )
+
+
+class ChunkContext(BaseModel):
+    chunk_id: int
+    text: str
+    page: int
+    chunk_index: int | None = None
+    section: str | None = None
+    doc_id: int
+    doc_name: str
+    highlight: bool = False
+
+
+@router.get("/{id}/chunk/{chunk_id}/context")
+async def get_chunk_context(
+    id: int,
+    chunk_id: int,
+    neighbors: int = Query(default=2, ge=0, le=5),
+    session: AsyncSession = Depends(deps.get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> list[ChunkContext]:
+    """Return the target chunk plus neighboring chunks for context."""
+    doc = await session.get(Document, id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    target = await session.get(Chunk, chunk_id)
+    if not target or target.doc_id != id:
+        raise HTTPException(status_code=404, detail="Chunk not found")
+
+    result = await session.exec(
+        select(Chunk)
+        .where(Chunk.doc_id == id)
+        .order_by(Chunk.page, Chunk.id)
+    )
+    all_chunks = result.all()
+
+    target_idx = next(
+        (i for i, c in enumerate(all_chunks) if c.id == chunk_id), None
+    )
+    if target_idx is None:
+        raise HTTPException(status_code=404, detail="Chunk not found in document")
+
+    start = max(0, target_idx - neighbors)
+    end = min(len(all_chunks), target_idx + neighbors + 1)
+
+    return [
+        ChunkContext(
+            chunk_id=c.id,
+            text=c.text,
+            page=c.page,
+            chunk_index=c.chunk_index,
+            section=c.section,
+            doc_id=id,
+            doc_name=doc.name,
+            highlight=(c.id == chunk_id),
+        )
+        for c in all_chunks[start:end]
+    ]

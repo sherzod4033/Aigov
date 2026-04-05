@@ -4,6 +4,7 @@ import { useForm } from 'react-hook-form';
 import { chatService } from '../services/chatService';
 import { Button } from '../components/ui/Button';
 import Input from '../components/ui/Input';
+import DocumentViewer from '../components/DocumentViewer';
 import { cn } from '../lib/utils';
 
 const INITIAL_ASSISTANT_MESSAGE = {
@@ -225,7 +226,7 @@ const MarkdownContent = ({ content }) => {
     const lines = (content || '').split('\n');
 
     return (
-        <div className="space-y-1.5 leading-relaxed">
+        <div className="min-w-0 space-y-1.5 overflow-hidden break-words leading-relaxed">
             {lines.map((line, index) => {
                 if (line.startsWith('### ')) {
                     return <h3 key={index} className="text-sm font-semibold">{renderInlineMarkdown(line.slice(4))}</h3>;
@@ -280,6 +281,7 @@ const ChatPage = ({ notebookId, mode = 'page' }) => {
     const chatStorageKey = getChatStorageKey(chatScope);
     const [messages, setMessages] = useState(() => loadMessagesFromStorage(chatStorageKey));
     const [selectedModel, setSelectedModel] = useState(MODEL_OPTIONS[0].value);
+    const [viewerSource, setViewerSource] = useState(null);
     const messagesEndRef = useRef(null);
     const isPageLeavingRef = useRef(false);
     const isNotebookPanel = mode === 'notebookPanel';
@@ -430,21 +432,35 @@ const ChatPage = ({ notebookId, mode = 'page' }) => {
         if (!Array.isArray(sources) || sources.length === 0) return null;
 
         return (
-            <details className="mt-3 rounded-lg border border-slate-200 bg-white/70 px-3 py-2 text-xs text-slate-500">
+            <details className="mt-3 rounded-lg border border-slate-200 bg-white/70 px-3 py-2 text-xs text-slate-500" style={{ containIntrinsicSize: 'auto', maxWidth: '100%' }}>
                 <summary className="cursor-pointer list-none font-semibold uppercase tracking-[0.08em] text-[#1f3a60]">
-                    Sources
+                    Sources ({sources.length})
                 </summary>
-                <div className="mt-2 space-y-1.5">
+                <div className="mt-2 space-y-1">
                     {sources.map((source, sourceIdx) => {
                         if (typeof source === 'string') {
-                            return <div key={sourceIdx}>Source: {source}</div>;
+                            return <div key={sourceIdx} className="truncate">Source: {source}</div>;
                         }
 
                         const docName = source.doc_name || `Source #${source.doc_id ?? 'N/A'}`;
-                        const page = source.page ? `, page ${source.page}` : '';
-                        const quote = source.quote ? ` — ${source.quote}` : '';
+                        const page = source.page ? `, стр. ${source.page}` : '';
 
-                        return <div key={source.chunk_id || sourceIdx}>{docName}{page}{quote}</div>;
+                        return (
+                            <button
+                                key={source.chunk_id || sourceIdx}
+                                type="button"
+                                onClick={() => setViewerSource({
+                                    docId: source.doc_id,
+                                    docName: source.doc_name,
+                                    chunkId: source.chunk_id,
+                                    page: source.page,
+                                })}
+                                className="block w-full cursor-pointer truncate rounded-md px-2 py-1 text-left transition hover:bg-slate-100"
+                            >
+                                <span className="font-medium text-[#1f3a60]">{docName}</span>
+                                <span className="text-slate-400">{page}</span>
+                            </button>
+                        );
                     })}
                 </div>
             </details>
@@ -452,7 +468,8 @@ const ChatPage = ({ notebookId, mode = 'page' }) => {
     };
 
     return (
-        <div className="h-full w-full">
+        <>
+        <div className="h-full w-full min-w-0 overflow-hidden">
             <div className={cn('flex h-full flex-col overflow-hidden bg-white', !isNotebookPanel && 'lg:border-l lg:border-slate-200')}>
                 <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 sm:px-6">
                     {isNotebookPanel ? (
@@ -482,7 +499,7 @@ const ChatPage = ({ notebookId, mode = 'page' }) => {
                     )}
                 </div>
 
-                <div className={cn('scrollbar-soft flex-1 overflow-y-auto px-4 py-6 sm:px-8', isNotebookPanel ? 'bg-slate-50' : 'space-y-6 bg-[#f6f8fc]')}>
+                <div className={cn('scrollbar-soft flex-1 overflow-y-auto overflow-x-hidden px-4 py-6 sm:px-8', isNotebookPanel ? 'bg-slate-50' : 'space-y-6 bg-[#f6f8fc]')}>
                     {isNotebookPanel && !hasConversation ? (
                         <div className="flex h-full min-h-[260px] flex-col items-center justify-center rounded-3xl border border-dashed border-slate-200 bg-white px-6 text-center shadow-sm">
                             <div className="rounded-2xl bg-[#1f3a60]/10 p-4 text-[#1f3a60]">
@@ -494,12 +511,12 @@ const ChatPage = ({ notebookId, mode = 'page' }) => {
                             </p>
                         </div>
                     ) : (
-                        <div className="space-y-6">
+                        <div className="w-full min-w-0 space-y-6">
                             {messages.map((msg, idx) => (
                                 <div
                                     key={`${msg.role}-${idx}`}
                                     className={cn(
-                                        'flex w-full items-start gap-3',
+                                        'flex w-full min-w-0 items-start gap-3',
                                         msg.role === 'user' ? 'justify-end' : 'justify-start',
                                     )}
                                 >
@@ -511,7 +528,7 @@ const ChatPage = ({ notebookId, mode = 'page' }) => {
 
                                     <div
                                         className={cn(
-                                            'max-w-[85%] rounded-2xl px-4 py-3 text-[15px] leading-relaxed shadow-sm sm:max-w-[74%]',
+                                            'min-w-0 max-w-[85%] rounded-2xl px-4 py-3 text-[15px] leading-relaxed shadow-sm sm:max-w-[74%] overflow-hidden',
                                             msg.role === 'user'
                                                 ? 'rounded-tr-md bg-[#1f3a60] text-white'
                                                 : 'rounded-tl-md border border-slate-200 bg-[#f2f4f7] text-slate-700',
@@ -566,22 +583,6 @@ const ChatPage = ({ notebookId, mode = 'page' }) => {
                 <div className="border-t border-slate-200 bg-white px-4 py-4 sm:px-6">
                     {isNotebookPanel ? (
                         <>
-                            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-slate-50 px-4 py-3 text-xs font-medium text-slate-500">
-                                <span>Контекст: ответы опираются только на источники этого блокнота.</span>
-                                <label className="flex items-center gap-2 text-slate-600">
-                                    <span>Модель</span>
-                                    <select
-                                        value={selectedModel}
-                                        onChange={(event) => setSelectedModel(event.target.value)}
-                                        className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#1f3a60]/20"
-                                    >
-                                        {MODEL_OPTIONS.map((option) => (
-                                            <option key={option.value} value={option.value}>{option.label}</option>
-                                        ))}
-                                    </select>
-                                </label>
-                            </div>
-
                             <form onSubmit={handleSubmit(onSubmit)} className="relative">
                                 <Paperclip className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                                 <Input
@@ -642,6 +643,16 @@ const ChatPage = ({ notebookId, mode = 'page' }) => {
                 </div>
             </div>
         </div>
+        {viewerSource && (
+            <DocumentViewer
+                docId={viewerSource.docId}
+                docName={viewerSource.docName}
+                chunkId={viewerSource.chunkId}
+                page={viewerSource.page}
+                onClose={() => setViewerSource(null)}
+            />
+        )}
+    </>
     );
 };
 
