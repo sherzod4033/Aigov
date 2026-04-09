@@ -100,6 +100,8 @@ const AdminDocumentsPage = ({ notebookId }) => {
     const [uploadError, setUploadError] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
     const [isDragActive, setIsDragActive] = useState(false);
+    const [sortField, setSortField] = useState('created_at');
+    const [sortOrder, setSortOrder] = useState('desc');
 
     // Поиск читаем из URL param ?q= (устанавливается хедером)
     const [searchParams] = useSearchParams();
@@ -289,6 +291,32 @@ const AdminDocumentsPage = ({ notebookId }) => {
         });
     }, [documents, searchTerm, statusFilter]);
 
+    const sortedDocuments = useMemo(() => {
+        const sorted = [...filteredDocuments];
+        sorted.sort((a, b) => {
+            let valA = a[sortField];
+            let valB = b[sortField];
+
+            if (sortField === 'name') {
+                valA = String(valA || '').toLowerCase();
+                valB = String(valB || '').toLowerCase();
+                if (valA < valB) return sortOrder === 'asc' ? -1 : 1;
+                if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
+                return 0;
+            } else if (sortField === 'created_at') {
+                const timeA = new Date(valA || 0).getTime();
+                const timeB = new Date(valB || 0).getTime();
+                return sortOrder === 'asc' ? timeA - timeB : timeB - timeA;
+            } else if (sortField === 'size') {
+                const sizeA = Number(valA || 0);
+                const sizeB = Number(valB || 0);
+                return sortOrder === 'asc' ? sizeA - sizeB : sizeB - sizeA;
+            }
+            return 0;
+        });
+        return sorted;
+    }, [filteredDocuments, sortField, sortOrder]);
+
     const onUpload = async (data) => {
         const selected = data.file?.[0];
         if (!selected) return;
@@ -443,7 +471,25 @@ const AdminDocumentsPage = ({ notebookId }) => {
                         ))}
                     </div>
 
-                    <div className="text-sm font-semibold text-slate-500">Сортировка: Дата (Сначала новые)</div>
+                    <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold text-slate-500">Сортировка:</span>
+                        <select
+                            value={`${sortField}-${sortOrder}`}
+                            onChange={(e) => {
+                                const [field, order] = e.target.value.split('-');
+                                setSortField(field);
+                                setSortOrder(order);
+                            }}
+                            className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 outline-none focus:border-[#1f3a60] focus:ring-1 focus:ring-[#1f3a60]"
+                        >
+                            <option value="created_at-desc">Дата (Сначала новые)</option>
+                            <option value="created_at-asc">Дата (Сначала старые)</option>
+                            <option value="name-asc">Имя (А-Я)</option>
+                            <option value="name-desc">Имя (Я-А)</option>
+                            <option value="size-desc">Размер (По убыванию)</option>
+                            <option value="size-asc">Размер (По возрастанию)</option>
+                        </select>
+                    </div>
                 </div>
 
                 <div className="overflow-x-auto">
@@ -469,14 +515,14 @@ const AdminDocumentsPage = ({ notebookId }) => {
                                         </div>
                                     </td>
                                 </tr>
-                            ) : filteredDocuments.length === 0 ? (
+                            ) : sortedDocuments.length === 0 ? (
                                 <tr>
                                     <td colSpan="6" className="px-5 py-12 text-center text-slate-500">
                                         Sources не найдены.
                                     </td>
                                 </tr>
                             ) : (
-                                filteredDocuments.map((doc) => {
+                                sortedDocuments.map((doc) => {
                                     const statusKey = resolveStatus(doc.status);
                                     const statusMeta = STATUS_META[statusKey];
                                     const languageTag = getLanguageTag(doc.language);
