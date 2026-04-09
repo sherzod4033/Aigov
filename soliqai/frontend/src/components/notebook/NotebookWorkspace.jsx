@@ -645,16 +645,45 @@ const NotebookWorkspace = ({ notebookId }) => {
 
             {/* Search */}
             <div className="px-6 pb-3">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="text"
-                  placeholder="Поиск источников по названию или URL..."
-                  value={sourceSearch}
-                  onChange={(e) => setSourceSearch(e.target.value)}
-                  className="h-10 w-full rounded-lg border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-800 placeholder-slate-400 transition focus:border-[#1f3a60] focus:outline-none focus:ring-2 focus:ring-[#1f3a60]/20"
-                />
-              </div>
+              {(() => {
+                const filtered = attachableSources.filter((s) =>
+                  !sourceSearch.trim() ||
+                  s.name?.toLowerCase().includes(sourceSearch.toLowerCase())
+                );
+                const allIds = filtered.map(s => s.id);
+                const areAllSelected = allIds.length > 0 && allIds.every(id => selectedExistingSourceIds.includes(id));
+                
+                return (
+                  <div className="flex items-center gap-3">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                      <input
+                        type="text"
+                        placeholder="Поиск источников по названию или URL..."
+                        value={sourceSearch}
+                        onChange={(e) => setSourceSearch(e.target.value)}
+                        className="h-10 w-full rounded-lg border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-800 placeholder-slate-400 transition focus:border-[#1f3a60] focus:outline-none focus:ring-2 focus:ring-[#1f3a60]/20"
+                      />
+                    </div>
+                    {filtered.length > 0 && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          if (areAllSelected) {
+                            setSelectedExistingSourceIds(prev => prev.filter(id => !allIds.includes(id)));
+                          } else {
+                            setSelectedExistingSourceIds(prev => Array.from(new Set([...prev, ...allIds])));
+                          }
+                        }}
+                        className="h-10 shrink-0 px-3"
+                      >
+                        {areAllSelected ? 'Сбросить все' : 'Выбрать все'}
+                      </Button>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Body */}
