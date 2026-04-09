@@ -145,9 +145,7 @@ const Layout = () => {
                 sidebarCollapsed ? 'w-[84px]' : 'w-64'
             )}>
                 <div className={cn('flex h-16 items-center border-b border-white/10', sidebarCollapsed ? 'justify-center px-3' : 'gap-3 px-5')}>
-                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#c5a059] text-sm font-extrabold text-[#1f3a60] shadow-lg">
-                        S
-                    </div>
+
                     {!sidebarCollapsed ? (
                     <div>
                         <p className="text-2xl font-bold leading-none">KnowledgeAI</p>
@@ -183,12 +181,12 @@ const Layout = () => {
                                     'group flex items-center rounded-lg py-2.5 text-sm font-semibold transition-all',
                                     sidebarCollapsed ? 'justify-center px-2' : 'gap-3 px-3',
                                     active
-                                        ? 'bg-white/12 text-[#c5a059] shadow-[inset_3px_0_0_0_#c5a059]'
+                                        ? 'bg-white/12 text-white'
                                         : 'text-slate-200/85 hover:bg-white/8 hover:text-white',
                                 )}
                                 title={sidebarCollapsed ? item.name : undefined}
                             >
-                                <Icon className={cn('h-[18px] w-[18px]', active ? 'text-[#c5a059]' : 'text-slate-300 group-hover:text-white')} />
+                                <Icon className={cn('h-[18px] w-[18px]', active ? 'text-white' : 'text-slate-300 group-hover:text-white')} />
                                 {!sidebarCollapsed ? item.name : null}
                             </Link>
                         );

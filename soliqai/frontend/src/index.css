@@ -39,18 +39,10 @@ h4 {
 
 .login-pattern {
   background-color: #18355c;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
-  background-size: 26px 26px;
 }
 
 .soft-grid {
   background-color: var(--app-bg);
-  background-image:
-    linear-gradient(rgba(31, 58, 96, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(31, 58, 96, 0.03) 1px, transparent 1px);
-  background-size: 20px 20px;
 }
 
 .scrollbar-soft::-webkit-scrollbar {
