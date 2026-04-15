@@ -782,7 +782,11 @@ async def retrieve_year_targeted_chunks(
     for i, doc_text in enumerate(documents):
         if not doc_text:
             continue
-        meta = metadatas[i] if i < len(metadatas) and isinstance(metadatas[i], dict) else {}
+        meta = (
+            metadatas[i]
+            if i < len(metadatas) and isinstance(metadatas[i], dict)
+            else {}
+        )
         distance = safe_float(distances[i] if i < len(distances) else None)
         ranked.append(
             {
@@ -798,7 +802,9 @@ async def retrieve_year_targeted_chunks(
                 "chunk_id": chunk_ids[i] if i < len(chunk_ids) else None,
                 "distance": distance,
                 "retrieval_method": "year_fallback",
-                "rerank_score": 1.0 / (1.0 + max(distance, 0.0)) if distance is not None else 0.15,
+                "rerank_score": 1.0 / (1.0 + max(distance, 0.0))
+                if distance is not None
+                else 0.15,
             }
         )
 
@@ -956,6 +962,7 @@ async def chat_request(
     language = rag_service.detect_language(normalized_question)
     runtime_settings = RuntimeSettingsService.get_settings()
     retrieval_top_k, top_k = resolve_retrieval_limits(runtime_settings)
+    enable_condense_query = bool(runtime_settings.get("enable_condense_query", True))
     model = runtime_settings.get("chat_model") or runtime_settings.get(
         "model", DEFAULT_CHAT_MODEL
     )
@@ -1028,11 +1035,9 @@ async def chat_request(
         chat_history.append({"role": "assistant", "content": log.answer})
 
     article_ref = rag_service._detect_article_reference(normalized_question)
-    if article_ref:
+    if article_ref or not enable_condense_query:
         search_query = normalized_question
-        logger.debug(
-            f"Article reference detected ({article_ref}), skipping condensation"
-        )
+        logger.debug("Skipping condensation for search query")
     else:
         search_query = await rag_service.condense_query(
             normalized_question, chat_history, model=model
@@ -1099,9 +1104,7 @@ async def chat_request(
     sources: list[SourceItem] = []
     expanded_context = await expand_with_neighbors(selected_chunks, session)
     filtered_context: list[str] = list(expanded_context)
-    context_metadata: list[dict[str, Any]] = [
-        {} for _ in expanded_context
-    ]
+    context_metadata: list[dict[str, Any]] = [{} for _ in expanded_context]
     for item in selected_chunks:
         chunk_text = item["text"]
         meta = item["metadata"]

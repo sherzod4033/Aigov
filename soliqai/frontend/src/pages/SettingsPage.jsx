@@ -18,6 +18,7 @@ const SettingsPage = () => {
     const [runtimeSettings, setRuntimeSettings] = useState({
         chat_model: '',
         embedding_model: '',
+        enable_condense_query: true,
         available_models: [],
         available_chat_models: [],
         available_embedding_models: [],
@@ -72,6 +73,7 @@ const SettingsPage = () => {
             const payload = {
                 chat_model: runtimeSettings.chat_model,
                 embedding_model: runtimeSettings.embedding_model,
+                enable_condense_query: runtimeSettings.enable_condense_query,
             };
             const response = await settingsService.update(payload);
             const settingsData = response.data || {};
@@ -176,6 +178,26 @@ const SettingsPage = () => {
                             </p>
                         )}
                     </div>
+                </div>
+
+                <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <label className="flex items-start gap-3">
+                        <input
+                            type="checkbox"
+                            checked={Boolean(runtimeSettings.enable_condense_query)}
+                            onChange={(event) => setRuntimeSettings((prev) => ({
+                                ...prev,
+                                enable_condense_query: event.target.checked,
+                            }))}
+                            className="mt-1 h-4 w-4 rounded border-slate-300 text-[#1f3a60] focus:ring-[#1f3a60]/25"
+                        />
+                        <span>
+                            <span className="block text-sm font-semibold text-slate-800">Condense query</span>
+                            <span className="mt-1 block text-xs text-slate-500">
+                                Если включено, система сначала переформулирует вопрос в самостоятельный поисковый запрос. Отключение может ускорить ответы, но хуже обрабатывает короткие follow-up вопросы из истории чата.
+                            </span>
+                        </span>
+                    </label>
                 </div>
 
                 <div className="mt-5 flex flex-wrap items-center gap-3">

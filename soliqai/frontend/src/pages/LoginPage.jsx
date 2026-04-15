@@ -64,8 +64,7 @@ const LoginPage = () => {
                                     <Shield className="h-6 w-6" />
                                 </div>
                                 <div className="text-left">
-                                    <p className="text-4xl font-extrabold leading-none text-[#1f3a60]">Andoz<span className="text-[#c5a059]">AI</span></p>
-                                    <p className="mt-1 text-sm font-semibold text-slate-500">Умный налоговый помощник</p>
+                                    <p className="text-4xl font-extrabold leading-none text-[#1f3a60]">Knowledge<span className="text-[#c5a059]">AI</span></p>
                                 </div>
                             </div>
                         </CardHeader>
@@ -81,7 +80,7 @@ const LoginPage = () => {
                                         <Input
                                             id="username"
                                             className="h-11 pl-9"
-                                            placeholder="user@andoz.tj"
+                                            placeholder="user@knowledge.local"
                                             {...register('username', { required: 'Введите имя пользователя' })}
                                         />
                                     </div>

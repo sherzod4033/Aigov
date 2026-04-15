@@ -19,6 +19,7 @@ class RuntimeSettingsResponse(BaseModel):
     model: str
     chat_model: str
     embedding_model: str
+    enable_condense_query: bool
     retrieval_top_k: int = Field(ge=1, le=50)
     top_k: int = Field(ge=1, le=20)
     default_domain_profile: str
@@ -34,6 +35,7 @@ class RuntimeSettingsUpdate(BaseModel):
     model: str | None = None
     chat_model: str | None = None
     embedding_model: str | None = None
+    enable_condense_query: bool | None = None
     retrieval_top_k: int | None = Field(default=None, ge=1, le=50)
     top_k: int | None = Field(default=None, ge=1, le=20)
     default_domain_profile: str | None = None
@@ -60,6 +62,7 @@ async def get_runtime_settings(
         model=runtime_settings["model"],
         chat_model=runtime_settings["chat_model"],
         embedding_model=runtime_settings["embedding_model"],
+        enable_condense_query=runtime_settings["enable_condense_query"],
         retrieval_top_k=runtime_settings["retrieval_top_k"],
         top_k=runtime_settings["top_k"],
         default_domain_profile=runtime_settings["default_domain_profile"],
@@ -88,6 +91,7 @@ async def update_runtime_settings(
         model=updated["model"],
         chat_model=updated["chat_model"],
         embedding_model=updated["embedding_model"],
+        enable_condense_query=updated["enable_condense_query"],
         retrieval_top_k=updated["retrieval_top_k"],
         top_k=updated["top_k"],
         default_domain_profile=updated["default_domain_profile"],

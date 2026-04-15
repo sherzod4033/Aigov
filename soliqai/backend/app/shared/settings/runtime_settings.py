@@ -13,6 +13,7 @@ class RuntimeSettingsService:
         "retrieval_top_k": 20,
         "top_k": 5,
         "default_domain_profile": "tax",
+        "enable_condense_query": True,
     }
 
     @classmethod
@@ -34,7 +35,9 @@ class RuntimeSettingsService:
 
         try:
             candidates.extend(
-                __import__("app.modules.rag.model_manager", fromlist=["ModelManager"]).ModelManager().list_ollama_models()
+                __import__("app.modules.rag.model_manager", fromlist=["ModelManager"])
+                .ModelManager()
+                .list_ollama_models()
             )
         except ExternalServiceError as exc:
             ollama_available = False
@@ -72,6 +75,9 @@ class RuntimeSettingsService:
             merged.get("retrieval_top_k")
         )
         merged["top_k"] = cls._normalize_top_k(merged.get("top_k"))
+        merged["enable_condense_query"] = cls._normalize_bool(
+            merged.get("enable_condense_query"), default=True
+        )
         if not merged["chat_model"]:
             merged["chat_model"] = cls.DEFAULTS["chat_model"]
         if not merged["embedding_model"]:
@@ -107,6 +113,7 @@ class RuntimeSettingsService:
             if old_embedding and old_embedding != embedding_model:
                 current["reindex_required"] = True
                 import logging
+
                 logging.getLogger(__name__).warning(
                     "Embedding model changed from %s to %s — reindex required. "
                     "Run reindex_documents.py to rebuild the vector store.",
@@ -122,6 +129,10 @@ class RuntimeSettingsService:
         if "default_domain_profile" in patch:
             current["default_domain_profile"] = cls._normalize_domain_profile(
                 patch["default_domain_profile"]
+            )
+        if "enable_condense_query" in patch:
+            current["enable_condense_query"] = cls._normalize_bool(
+                patch["enable_condense_query"], default=True
             )
 
         path = cls._settings_path()
@@ -150,6 +161,7 @@ class RuntimeSettingsService:
     def _normalize_domain_profile(value: Any) -> str:
         profile = str(value or "").strip().lower()
         from app.domain_profiles import list_domain_profiles as _list_profiles
+
         available = set(_list_profiles())
         return profile if profile in available else "tax"
 
@@ -164,3 +176,17 @@ class RuntimeSettingsService:
             seen.add(normalized)
             unique_models.append(normalized)
         return unique_models
+
+    @staticmethod
+    def _normalize_bool(value: Any, default: bool) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "yes", "on"}:
+                return True
+            if normalized in {"0", "false", "no", "off"}:
+                return False
+        if value is None:
+            return default
+        return bool(value)
