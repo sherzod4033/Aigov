@@ -1,0 +1,1257 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ILM — Локальный AI-ассистент для документов</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    /* ===== RESET ===== */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+
+    /* ===== DESIGN TOKENS (matching app) ===== */
+    :root {
+      --primary:      #1f3a60;
+      --primary-dark: #162945;
+      --primary-soft: rgba(31,58,96,.08);
+      --gold:         #c5a059;
+      --gold-dark:    #b18f4e;
+      --gold-soft:    rgba(197,160,89,.12);
+      --bg:           #f3f5f8;
+      --surface:      #ffffff;
+      --border:       #dfe4ee;
+      --border-soft:  #e2e8f0;
+      --txt:          #1f2937;
+      --txt-2:        #4b5563;
+      --txt-3:        #9ca3af;
+      --shadow-sm:    0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.06);
+      --shadow-md:    0 4px 12px rgba(31,58,96,.10);
+      --shadow-lg:    0 8px 28px rgba(31,58,96,.15);
+      --shadow-btn:   0 8px 18px rgba(31,58,96,.22);
+      --shadow-gold:  0 8px 18px rgba(197,160,89,.28);
+      --radius-sm:    8px;
+      --radius-md:    12px;
+      --radius-lg:    16px;
+      --radius-xl:    20px;
+      --ff-head:      'Outfit', system-ui, sans-serif;
+      --ff-body:      'Inter', system-ui, sans-serif;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--txt);
+      font-family: var(--ff-body);
+      font-weight: 400;
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    /* ===== LAYOUT ===== */
+    .wrap {
+      max-width: 1160px;
+      margin: 0 auto;
+      padding: 0 2rem;
+    }
+
+    /* ===== NAV ===== */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0;
+      z-index: 200;
+      background: var(--primary);
+      box-shadow: 0 2px 16px rgba(15,32,64,.22);
+    }
+    .nav-row {
+      height: 64px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+
+    /* Logo matches sidebar style */
+    .logo {
+      display: flex; align-items: center; gap: .75rem;
+      text-decoration: none;
+    }
+    .logo-icon {
+      width: 36px; height: 36px;
+      background: var(--gold);
+      border-radius: var(--radius-sm);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .logo-icon svg { width: 18px; height: 18px; color: white; }
+    .logo-name {
+      font-family: var(--ff-head);
+      font-size: 1.35rem; font-weight: 700;
+      color: white; letter-spacing: .01em;
+    }
+    .logo-tag {
+      font-size: .7rem; color: rgba(255,255,255,.5);
+      letter-spacing: .1em; text-transform: uppercase;
+      font-weight: 400; margin-left: -.2rem;
+    }
+
+    .nav-links {
+      display: flex; align-items: center; gap: .25rem;
+      list-style: none;
+    }
+    .nav-links a {
+      color: rgba(255,255,255,.75);
+      text-decoration: none; font-size: .875rem; font-weight: 500;
+      padding: .5rem 1rem; border-radius: var(--radius-sm);
+      transition: all .18s;
+    }
+    .nav-links a:hover {
+      color: white;
+      background: rgba(255,255,255,.08);
+    }
+    .btn-nav-cta {
+      display: flex; align-items: center; gap: .4rem;
+      background: var(--gold) !important;
+      color: white !important;
+      padding: .5rem 1.2rem !important;
+      border-radius: var(--radius-sm) !important;
+      font-weight: 600 !important;
+      transition: background .18s !important;
+    }
+    .btn-nav-cta:hover { background: var(--gold-dark) !important; }
+
+    /* ===== HERO ===== */
+    .hero {
+      background: var(--primary);
+      padding: 8rem 0 5.5rem;
+      position: relative;
+      overflow: hidden;
+    }
+    /* Subtle dot grid pattern like login page */
+    .hero::before {
+      content: '';
+      position: absolute; inset: 0;
+      background-image: radial-gradient(circle, rgba(255,255,255,.06) 1px, transparent 1px);
+      background-size: 28px 28px;
+      pointer-events: none;
+    }
+    /* Radial glow */
+    .hero::after {
+      content: '';
+      position: absolute; top: -20%; left: 50%;
+      transform: translateX(-50%);
+      width: 800px; height: 500px;
+      background: radial-gradient(ellipse at center, rgba(197,160,89,.12) 0%, transparent 65%);
+      pointer-events: none;
+    }
+
+    .hero-inner {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4rem; align-items: center;
+      position: relative; z-index: 1;
+    }
+
+    .hero-badge {
+      display: inline-flex; align-items: center; gap: .5rem;
+      background: rgba(197,160,89,.15);
+      border: 1px solid rgba(197,160,89,.3);
+      border-radius: 100px;
+      padding: .3rem .9rem;
+      font-size: .72rem; font-weight: 600;
+      color: var(--gold); letter-spacing: .1em; text-transform: uppercase;
+      margin-bottom: 1.5rem;
+    }
+    .badge-dot {
+      width: 6px; height: 6px;
+      background: var(--gold); border-radius: 50%;
+      animation: blink 2.2s ease-in-out infinite;
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.35} }
+
+    .hero-title {
+      font-family: var(--ff-head);
+      font-size: clamp(2.4rem, 4vw, 3.8rem);
+      font-weight: 800;
+      line-height: 1.1;
+      color: white;
+      margin-bottom: 1.25rem;
+      letter-spacing: -.01em;
+    }
+    .hero-title .accent { color: var(--gold); }
+
+    .hero-desc {
+      font-size: 1.05rem;
+      color: rgba(255,255,255,.65);
+      line-height: 1.75;
+      margin-bottom: 2.2rem;
+      max-width: 460px;
+    }
+
+    .hero-ctas {
+      display: flex; gap: .85rem; flex-wrap: wrap;
+      margin-bottom: 3rem;
+    }
+    .btn-primary {
+      display: inline-flex; align-items: center; gap: .5rem;
+      background: var(--gold);
+      color: white;
+      padding: .8rem 1.9rem;
+      border-radius: var(--radius-sm);
+      font-family: var(--ff-body);
+      font-weight: 600; font-size: .95rem;
+      text-decoration: none;
+      box-shadow: var(--shadow-gold);
+      transition: all .2s;
+    }
+    .btn-primary:hover {
+      background: var(--gold-dark);
+      transform: translateY(-2px);
+      box-shadow: 0 12px 28px rgba(197,160,89,.35);
+    }
+    .btn-outline-white {
+      display: inline-flex; align-items: center; gap: .5rem;
+      background: rgba(255,255,255,.08);
+      border: 1px solid rgba(255,255,255,.2);
+      color: white;
+      padding: .8rem 1.9rem;
+      border-radius: var(--radius-sm);
+      font-weight: 500; font-size: .95rem;
+      text-decoration: none;
+      transition: all .2s;
+    }
+    .btn-outline-white:hover {
+      background: rgba(255,255,255,.14);
+      border-color: rgba(255,255,255,.35);
+      transform: translateY(-2px);
+    }
+
+    /* Hero stats — like the stats strip in the app */
+    .hero-stats {
+      display: flex; gap: 0;
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      background: rgba(255,255,255,.04);
+    }
+    .h-stat {
+      flex: 1;
+      padding: 1rem 1.25rem;
+      border-right: 1px solid rgba(255,255,255,.1);
+      text-align: center;
+    }
+    .h-stat:last-child { border-right: none; }
+    .h-stat-v {
+      font-family: var(--ff-head);
+      font-size: 1.5rem; font-weight: 700;
+      color: var(--gold); display: block; line-height: 1;
+      margin-bottom: .3rem;
+    }
+    .h-stat-l {
+      font-size: .72rem; color: rgba(255,255,255,.5);
+      font-weight: 500; letter-spacing: .04em;
+    }
+
+    /* ===== CHAT MOCKUP ===== */
+    .mockup-wrap { position: relative; }
+
+    /* Floating cards */
+    .fl {
+      position: absolute;
+      background: white;
+      border: 1px solid var(--border-soft);
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow-lg);
+      padding: .8rem 1rem;
+      display: flex; align-items: center; gap: .65rem;
+      font-size: .8rem; z-index: 3;
+    }
+    .fl-doc {
+      top: -20px; right: -16px;
+      animation: floatA 4.5s ease-in-out infinite;
+    }
+    .fl-search {
+      bottom: -18px; left: -16px;
+      animation: floatB 5s ease-in-out infinite;
+    }
+    @keyframes floatA { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-7px)} }
+    @keyframes floatB { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-5px)} }
+    .fl-doc-ico {
+      width: 32px; height: 32px;
+      background: var(--primary-soft);
+      border-radius: var(--radius-sm);
+      display: flex; align-items: center; justify-content: center;
+      color: var(--primary); flex-shrink: 0;
+    }
+    .fl-doc-name { font-weight: 600; color: var(--txt); }
+    .fl-doc-meta { color: var(--txt-3); font-size: .68rem; }
+    .fl-search-lbl {
+      color: var(--primary); font-weight: 600;
+      display: flex; align-items: center; gap: .35rem;
+    }
+    .fl-search-meta { color: var(--txt-3); font-size: .7rem; }
+
+    /* Chat window */
+    .chat-win {
+      background: white;
+      border: 1px solid var(--border-soft);
+      border-radius: var(--radius-xl);
+      overflow: hidden;
+      box-shadow: var(--shadow-lg);
+    }
+    .chat-top {
+      background: var(--primary);
+      padding: 1rem 1.25rem;
+      display: flex; align-items: center; gap: .75rem;
+    }
+    .chat-top-title {
+      font-family: var(--ff-head);
+      font-size: .875rem; font-weight: 600;
+      color: white; flex: 1;
+    }
+    .chat-doc-count {
+      padding: .2rem .65rem;
+      background: rgba(255,255,255,.12);
+      border-radius: 100px;
+      font-size: .7rem; color: rgba(255,255,255,.8);
+      display: flex; align-items: center; gap: .3rem;
+    }
+
+    .chat-body {
+      padding: 1.25rem;
+      display: flex; flex-direction: column; gap: 1rem;
+      min-height: 220px;
+      background: #f6f8fc;
+    }
+    .msg { max-width: 85%; font-size: .84rem; line-height: 1.55; }
+    .msg-u {
+      align-self: flex-end;
+      background: var(--primary);
+      color: white;
+      padding: .7rem 1rem;
+      border-radius: var(--radius-lg) var(--radius-lg) 4px var(--radius-lg);
+      box-shadow: var(--shadow-sm);
+    }
+    .msg-a {
+      align-self: flex-start;
+      background: var(--surface);
+      color: var(--txt);
+      border: 1px solid var(--border-soft);
+      padding: .7rem 1rem;
+      border-radius: var(--radius-lg) var(--radius-lg) var(--radius-lg) 4px;
+      box-shadow: var(--shadow-sm);
+    }
+    .src-chip {
+      display: inline-flex; align-items: center; gap: .3rem;
+      margin-top: .55rem;
+      padding: .22rem .6rem;
+      background: var(--primary-soft);
+      border: 1px solid rgba(31,58,96,.15);
+      border-radius: var(--radius-sm);
+      font-size: .68rem; color: var(--primary); font-weight: 500;
+    }
+    .typing-dots {
+      display: flex; gap: 4px;
+      padding: .65rem .95rem;
+      background: var(--surface);
+      border: 1px solid var(--border-soft);
+      border-radius: var(--radius-lg) var(--radius-lg) var(--radius-lg) 4px;
+      align-self: flex-start; width: fit-content;
+      box-shadow: var(--shadow-sm);
+    }
+    .typing-dots span {
+      width: 6px; height: 6px;
+      background: var(--txt-3); border-radius: 50%;
+      animation: dot 1.4s ease-in-out infinite;
+    }
+    .typing-dots span:nth-child(2){animation-delay:.22s}
+    .typing-dots span:nth-child(3){animation-delay:.44s}
+    @keyframes dot {
+      0%,60%,100%{transform:translateY(0);opacity:.4}
+      30%{transform:translateY(-5px);opacity:1}
+    }
+
+    .chat-footer {
+      padding: .85rem 1.25rem;
+      border-top: 1px solid var(--border);
+      display: flex; align-items: center; gap: .65rem;
+      background: white;
+    }
+    .chat-input {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: .5rem .9rem;
+      font-family: var(--ff-body); font-size: .84rem;
+      color: var(--txt-3);
+      outline: none;
+    }
+    .send-btn {
+      width: 34px; height: 34px;
+      background: var(--primary);
+      border: none; border-radius: var(--radius-sm);
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; flex-shrink: 0;
+      transition: background .18s;
+    }
+    .send-btn:hover { background: var(--primary-dark); }
+
+    /* ===== SECTION COMMON ===== */
+    section { padding: 5.5rem 0; }
+
+    .sec-label {
+      display: inline-flex; align-items: center; gap: .5rem;
+      font-size: .72rem; font-weight: 600;
+      letter-spacing: .14em; text-transform: uppercase;
+      color: var(--gold); margin-bottom: .75rem;
+    }
+    .sec-label::before {
+      content: '';
+      width: 20px; height: 2px;
+      background: var(--gold); border-radius: 2px;
+    }
+    .sec-title {
+      font-family: var(--ff-head);
+      font-size: clamp(1.9rem, 3.2vw, 2.8rem);
+      font-weight: 700; line-height: 1.18;
+      color: var(--txt); letter-spacing: -.01em;
+    }
+    .sec-title .accent { color: var(--primary); }
+    .sec-desc {
+      font-size: 1rem; color: var(--txt-2);
+      line-height: 1.75; margin-top: .85rem;
+    }
+
+    /* ===== FEATURES ===== */
+    #features { background: white; }
+    #features .hd {
+      text-align: center;
+      margin-bottom: 3.5rem;
+    }
+    #features .hd .sec-desc { max-width: 520px; margin: .85rem auto 0; }
+
+    .feat-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.25rem;
+    }
+    .feat-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 1.75rem;
+      transition: all .25s;
+    }
+    .feat-card:hover {
+      background: white;
+      border-color: rgba(31,58,96,.18);
+      box-shadow: var(--shadow-md);
+      transform: translateY(-3px);
+    }
+    .feat-ico {
+      width: 46px; height: 46px;
+      background: var(--primary-soft);
+      border-radius: var(--radius-md);
+      display: flex; align-items: center; justify-content: center;
+      margin-bottom: 1.1rem;
+      color: var(--primary);
+    }
+    .feat-name {
+      font-family: var(--ff-head);
+      font-size: 1rem; font-weight: 600;
+      color: var(--txt); margin-bottom: .5rem;
+    }
+    .feat-body { font-size: .875rem; color: var(--txt-2); line-height: 1.7; }
+
+    /* ===== HOW IT WORKS ===== */
+    #how { background: var(--bg); }
+    #how .hd { text-align: center; margin-bottom: 3.5rem; }
+    #how .hd .sec-desc { max-width: 480px; margin: .85rem auto 0; }
+
+    .steps-grid {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr auto 1fr;
+      gap: 0; align-items: start;
+    }
+    .step-arrow {
+      padding-top: 1.75rem;
+      color: var(--border);
+      font-size: 1.5rem;
+      display: flex; align-items: flex-start; justify-content: center;
+      padding-left: .5rem; padding-right: .5rem;
+    }
+    .step {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 2rem 1.75rem;
+      box-shadow: var(--shadow-sm);
+    }
+    .step-n {
+      width: 40px; height: 40px;
+      background: var(--primary);
+      border-radius: var(--radius-md);
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--ff-head);
+      font-size: 1rem; font-weight: 700;
+      color: white; margin-bottom: 1.1rem;
+    }
+    .step-t {
+      font-family: var(--ff-head);
+      font-size: 1rem; font-weight: 600;
+      color: var(--txt); margin-bottom: .55rem;
+    }
+    .step-d { font-size: .875rem; color: var(--txt-2); line-height: 1.7; }
+
+    /* ===== PRIVACY ===== */
+    #privacy { background: white; }
+    .priv-grid {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 5rem; align-items: center;
+    }
+    .priv-checks {
+      display: flex; flex-direction: column; gap: 1.1rem;
+      margin-top: 1.75rem;
+    }
+    .priv-check {
+      display: flex; gap: .9rem; align-items: flex-start;
+    }
+    .check-ico {
+      width: 22px; height: 22px;
+      background: rgba(34,197,94,.1);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; margin-top: .1rem;
+      color: #16a34a;
+    }
+    .check-ico svg { width: 12px; height: 12px; }
+    .priv-check-txt {
+      font-size: .9rem; color: var(--txt-2); line-height: 1.65;
+    }
+
+    /* Server diagram */
+    .srv-diagram {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xl);
+      overflow: hidden;
+    }
+    .srv-header {
+      background: var(--primary);
+      padding: 1.5rem 1.75rem;
+      display: flex; align-items: center; gap: 1rem;
+    }
+    .srv-ico {
+      width: 44px; height: 44px;
+      background: rgba(255,255,255,.12);
+      border-radius: var(--radius-sm);
+      display: flex; align-items: center; justify-content: center;
+      color: var(--gold);
+    }
+    .srv-header-txt { color: white; }
+    .srv-header-title {
+      font-family: var(--ff-head);
+      font-size: 1rem; font-weight: 600;
+    }
+    .srv-header-sub {
+      font-size: .78rem; color: rgba(255,255,255,.55); margin-top: .15rem;
+    }
+    .srv-rows {
+      padding: 1.25rem;
+      display: flex; flex-direction: column; gap: .65rem;
+    }
+    .srv-row {
+      display: flex; align-items: center; gap: .8rem;
+      background: white;
+      border: 1px solid var(--border-soft);
+      border-radius: var(--radius-sm);
+      padding: .7rem 1rem;
+      font-size: .84rem;
+    }
+    .srv-row-name { color: var(--txt); font-weight: 500; }
+    .srv-row-tag {
+      margin-left: auto;
+      font-size: .68rem; color: var(--txt-3);
+      background: var(--bg); border: 1px solid var(--border);
+      padding: .18rem .5rem; border-radius: 100px;
+    }
+    .led {
+      width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+    }
+    .led-g { background: #22c55e; box-shadow: 0 0 6px rgba(34,197,94,.5); }
+    .led-b { background: #3b82f6; box-shadow: 0 0 6px rgba(59,130,246,.5); }
+    .led-y { background: var(--gold); box-shadow: 0 0 6px rgba(197,160,89,.5); }
+
+    /* ===== TECH ===== */
+    #tech {
+      background: var(--primary);
+      padding: 3.5rem 0;
+      text-align: center;
+    }
+    .tech-lbl {
+      font-size: .72rem; font-weight: 600;
+      letter-spacing: .15em; text-transform: uppercase;
+      color: rgba(255,255,255,.4); margin-bottom: 2rem;
+    }
+    .tech-row {
+      display: flex; justify-content: center;
+      gap: .75rem; flex-wrap: wrap;
+    }
+    .tech-chip {
+      display: flex; align-items: center; gap: .5rem;
+      padding: .55rem 1.15rem;
+      background: rgba(255,255,255,.08);
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: var(--radius-sm);
+      font-size: .84rem; color: rgba(255,255,255,.75);
+      transition: all .18s;
+    }
+    .tech-chip:hover {
+      background: rgba(255,255,255,.13);
+      border-color: rgba(255,255,255,.2);
+      color: white;
+    }
+
+    /* ===== LANG ===== */
+    #lang {
+      background: white;
+      padding: 3.5rem 0;
+      text-align: center;
+      border-top: 1px solid var(--border);
+    }
+    .lang-row {
+      display: flex; justify-content: center;
+      gap: 1rem; flex-wrap: wrap; margin-top: 1.75rem;
+    }
+    .lang-chip {
+      display: flex; align-items: center; gap: .75rem;
+      padding: .85rem 1.75rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      font-size: .9rem; color: var(--txt-2); font-weight: 500;
+      transition: all .18s;
+    }
+    .lang-chip:hover {
+      border-color: rgba(31,58,96,.25);
+      background: var(--primary-soft);
+      color: var(--primary);
+    }
+    .lang-flag { font-size: 1.35rem; }
+
+    /* ===== CTA ===== */
+    #cta {
+      background: var(--primary);
+      padding: 6rem 0;
+      text-align: center;
+      position: relative; overflow: hidden;
+    }
+    #cta::before {
+      content: '';
+      position: absolute; inset: 0;
+      background-image: radial-gradient(circle, rgba(255,255,255,.055) 1px, transparent 1px);
+      background-size: 28px 28px;
+      pointer-events: none;
+    }
+    #cta::after {
+      content: '';
+      position: absolute; top: -30%; left: 50%;
+      transform: translateX(-50%);
+      width: 700px; height: 400px;
+      background: radial-gradient(ellipse at center, rgba(197,160,89,.14) 0%, transparent 65%);
+      pointer-events: none;
+    }
+    .cta-inner { position: relative; z-index: 1; }
+    .cta-title {
+      font-family: var(--ff-head);
+      font-size: clamp(2rem, 3.8vw, 3.2rem);
+      font-weight: 800; line-height: 1.15;
+      color: white; margin-bottom: 1.1rem;
+      letter-spacing: -.01em;
+    }
+    .cta-title .accent { color: var(--gold); }
+    .cta-desc {
+      font-size: 1rem; color: rgba(255,255,255,.6);
+      line-height: 1.75; max-width: 450px;
+      margin: 0 auto 2.2rem;
+    }
+    .cta-btns {
+      display: flex; gap: .85rem; justify-content: center; flex-wrap: wrap;
+    }
+    .cta-cmd {
+      display: inline-flex; align-items: center; gap: .7rem;
+      margin-top: 2rem;
+      padding: .85rem 1.75rem;
+      background: rgba(255,255,255,.06);
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: var(--radius-sm);
+      font-family: 'IBM Plex Mono', 'Courier New', monospace;
+      font-size: .875rem; color: #7dd3fc;
+    }
+    .cta-cmd-copy {
+      width: 24px; height: 24px;
+      background: rgba(255,255,255,.08);
+      border: none; border-radius: 4px;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; color: rgba(255,255,255,.5);
+      transition: all .18s; padding: 0;
+    }
+    .cta-cmd-copy:hover { background: rgba(255,255,255,.15); color: white; }
+
+    /* ===== FOOTER ===== */
+    footer {
+      background: var(--primary-dark);
+      padding: 2.5rem 0;
+    }
+    .foot-row {
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .foot-copy { font-size: .8rem; color: rgba(255,255,255,.35); }
+    .foot-links { display: flex; gap: 2rem; }
+    .foot-links a {
+      font-size: .8rem; color: rgba(255,255,255,.4);
+      text-decoration: none; transition: color .18s;
+    }
+    .foot-links a:hover { color: rgba(255,255,255,.75); }
+
+    /* ===== REVEAL ===== */
+    .rv {
+      opacity: 0; transform: translateY(22px);
+      transition: opacity .6s ease, transform .6s ease;
+    }
+    .rv.on { opacity: 1; transform: translateY(0); }
+    .rv.d1 { transition-delay: .08s; }
+    .rv.d2 { transition-delay: .16s; }
+    .rv.d3 { transition-delay: .24s; }
+    .rv.d4 { transition-delay: .32s; }
+    .rv.d5 { transition-delay: .4s; }
+
+    /* ===== RESPONSIVE ===== */
+    @media (max-width: 1000px) {
+      .hero-inner { grid-template-columns: 1fr; gap: 3rem; }
+      .feat-grid { grid-template-columns: repeat(2, 1fr); }
+      .steps-grid { grid-template-columns: 1fr; gap: 1.25rem; }
+      .step-arrow { display: none; }
+      .priv-grid { grid-template-columns: 1fr; gap: 3rem; }
+      .nav-links { display: none; }
+      .fl-doc, .fl-search { display: none; }
+    }
+    @media (max-width: 620px) {
+      .feat-grid { grid-template-columns: 1fr; }
+      .foot-row { flex-direction: column; gap: 1.5rem; text-align: center; }
+      .hero-stats { flex-direction: column; gap: 0; }
+      .h-stat { border-right: none; border-bottom: 1px solid rgba(255,255,255,.1); }
+      .h-stat:last-child { border-bottom: none; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════
+     NAV
+══════════════════════════════════ -->
+<nav>
+  <div class="wrap">
+    <div class="nav-row">
+      <a href="#" class="logo">
+        <div class="logo-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round">
+            <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+            <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+          </svg>
+        </div>
+        <div>
+          <div class="logo-name">ILM</div>
+        </div>
+      </a>
+      <ul class="nav-links">
+        <li><a href="#features">Возможности</a></li>
+        <li><a href="#how">Как работает</a></li>
+        <li><a href="#privacy">Приватность</a></li>
+        <li><a href="#" class="btn-nav-cta">Начать →</a></li>
+      </ul>
+    </div>
+  </div>
+</nav>
+
+<!-- ══════════════════════════════════
+     HERO
+══════════════════════════════════ -->
+<section class="hero">
+  <div class="wrap">
+    <div class="hero-inner">
+
+      <!-- Copy -->
+      <div>
+        <div class="hero-badge">
+          <span class="badge-dot"></span>
+          Self-hosted · On-premise
+        </div>
+
+        <h1 class="hero-title">
+          Локальный AI<br>для <span class="accent">ваших</span><br>документов
+        </h1>
+
+        <p class="hero-desc">
+          ILM — платформа для интеллектуальной работы с документами.
+          Задавайте вопросы, получайте точные ответы со ссылками на источники.
+          Всё работает на вашем сервере — без внешних API и утечки данных.
+        </p>
+
+        <div class="hero-ctas">
+          <a href="#" class="btn-primary">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <path d="M5 3l14 9-14 9V3z"/>
+            </svg>
+            Развернуть ILM
+          </a>
+          <a href="#" class="btn-outline-white">
+            Документация →
+          </a>
+        </div>
+
+        <div class="hero-stats">
+          <div class="h-stat">
+            <span class="h-stat-v">100%</span>
+            <span class="h-stat-l">Локально</span>
+          </div>
+          <div class="h-stat">
+            <span class="h-stat-v">3</span>
+            <span class="h-stat-l">Языка</span>
+          </div>
+          <div class="h-stat">
+            <span class="h-stat-v">On-premise</span>
+            <span class="h-stat-l">Ваш сервер</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chat mockup -->
+      <div class="mockup-wrap">
+
+        <!-- Floating: doc -->
+        <div class="fl fl-doc">
+          <div class="fl-doc-ico">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+            </svg>
+          </div>
+          <div>
+            <div class="fl-doc-name">Налоговый_кодекс_2024.pdf</div>
+            <div class="fl-doc-meta">847 стр. · Проиндексировано ✓</div>
+          </div>
+        </div>
+
+        <div class="chat-win">
+          <!-- Header -->
+          <div class="chat-top">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.6)" stroke-width="2">
+              <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+              <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+            </svg>
+            <span class="chat-top-title">ILM · Chat</span>
+            <div class="chat-doc-count">
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              </svg>
+              2 документа
+            </div>
+          </div>
+
+          <!-- Messages -->
+          <div class="chat-body" id="chat">
+            <div class="msg msg-u">
+              Каков размер НДС для IT-компаний?
+            </div>
+            <div class="msg msg-a" id="ai-resp" style="display:none">
+              Для IT-компаний, зарегистрированных в технопарках, ставка НДС составляет
+              <strong>0%</strong> до 2028 года согласно льготному режиму.
+              <div>
+                <span class="src-chip">
+                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                  </svg>
+                  НК_2024.pdf · стр. 142
+                </span>
+              </div>
+            </div>
+            <div class="typing-dots" id="typing" style="display:none">
+              <span></span><span></span><span></span>
+            </div>
+          </div>
+
+          <!-- Input -->
+          <div class="chat-footer">
+            <input class="chat-input" type="text" value="Задайте вопрос по документам..." disabled>
+            <button class="send-btn" aria-label="Отправить">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5">
+                <line x1="22" y1="2" x2="11" y2="13"/>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Floating: search -->
+        <div class="fl fl-search">
+          <div class="fl-search-lbl">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+            Гибридный поиск
+          </div>
+          <span class="fl-search-meta">BM25 + Семантический</span>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════
+     FEATURES
+══════════════════════════════════ -->
+<section id="features">
+  <div class="wrap">
+    <div class="hd rv">
+      <div class="sec-label">Возможности</div>
+      <h2 class="sec-title">Всё для работы с <span class="accent">документами</span></h2>
+      <p class="sec-desc">Интеллектуальный поиск, точные ответы и полный контроль над данными — без подписок и внешних сервисов.</p>
+    </div>
+
+    <div class="feat-grid">
+
+      <div class="feat-card rv">
+        <div class="feat-ico">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+          </svg>
+        </div>
+        <div class="feat-name">Чат с документами</div>
+        <div class="feat-body">Задавайте вопросы на естественном языке. Получайте ответы с точными цитатами и ссылками на страницы источника.</div>
+      </div>
+
+      <div class="feat-card rv d1">
+        <div class="feat-ico">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"/>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+        </div>
+        <div class="feat-name">Гибридный поиск</div>
+        <div class="feat-body">Семантический поиск ChromaDB + ключевой BM25 объединяются через Reciprocal Rank Fusion для максимальной точности.</div>
+      </div>
+
+      <div class="feat-card rv d2">
+        <div class="feat-ico">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+          </svg>
+        </div>
+        <div class="feat-name">Полная приватность</div>
+        <div class="feat-body">Никаких внешних API. Все модели, вычисления и данные работают исключительно на вашем сервере.</div>
+      </div>
+
+      <div class="feat-card rv d1">
+        <div class="feat-ico">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+            <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+          </svg>
+        </div>
+        <div class="feat-name">Блокноты</div>
+        <div class="feat-body">Организуйте документы в тематические коллекции: налоговое право, договоры, внутренние регламенты.</div>
+      </div>
+
+      <div class="feat-card rv d2">
+        <div class="feat-ico">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+          </svg>
+        </div>
+        <div class="feat-name">Заметки и инсайты</div>
+        <div class="feat-body">Автоматически генерируйте ключевые выводы из документов. Фиксируйте важные наблюдения вручную.</div>
+      </div>
+
+      <div class="feat-card rv d3">
+        <div class="feat-ico">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+        </div>
+        <div class="feat-name">Ролевой доступ</div>
+        <div class="feat-body">Гибкое управление правами: администратор, контент-менеджер, пользователь. JWT-аутентификация.</div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════
+     HOW IT WORKS
+══════════════════════════════════ -->
+<section id="how">
+  <div class="wrap">
+    <div class="hd rv">
+      <div class="sec-label">Как это работает</div>
+      <h2 class="sec-title">Три шага до <span class="accent">ответа</span></h2>
+      <p class="sec-desc">От загрузки документа до точного ответа со ссылкой на источник.</p>
+    </div>
+
+    <div class="steps-grid">
+      <div class="step rv">
+        <div class="step-n">1</div>
+        <div class="step-t">Загрузите документы</div>
+        <div class="step-d">PDF, DOCX или TXT. Автоматический OCR для сканов. Тексты индексируются и разбиваются на семантические фрагменты.</div>
+      </div>
+
+      <div class="step-arrow rv d1">→</div>
+
+      <div class="step rv d1">
+        <div class="step-n">2</div>
+        <div class="step-t">Задайте вопрос</div>
+        <div class="step-d">Напишите вопрос на русском, узбекском или таджикском. Гибридный поиск найдёт самые релевантные фрагменты.</div>
+      </div>
+
+      <div class="step-arrow rv d2">→</div>
+
+      <div class="step rv d2">
+        <div class="step-n">3</div>
+        <div class="step-t">Получите ответ</div>
+        <div class="step-d">Локальная LLM Gemma (Ollama) генерирует точный ответ на основе ваших документов с цитатами и номерами страниц.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════
+     PRIVACY
+══════════════════════════════════ -->
+<section id="privacy">
+  <div class="wrap">
+    <div class="priv-grid">
+
+      <div>
+        <div class="sec-label rv">Приватность</div>
+        <h2 class="sec-title rv d1">Ваши данные не<br>покидают <span class="accent">сервер</span></h2>
+        <p class="sec-desc rv d2">В отличие от облачных решений, ILM работает полностью локально. Конфиденциальные документы остаются только под вашим контролем.</p>
+
+        <div class="priv-checks">
+          <div class="priv-check rv d2">
+            <div class="check-ico">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+            <span class="priv-check-txt">Никаких запросов к OpenAI, Google или другим AI-сервисам — все модели локально через Ollama</span>
+          </div>
+          <div class="priv-check rv d3">
+            <div class="check-ico">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+            <span class="priv-check-txt">ChromaDB и PostgreSQL разворачиваются на вашей инфраструктуре через Docker</span>
+          </div>
+          <div class="priv-check rv d4">
+            <div class="check-ico">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+            <span class="priv-check-txt">Полный контроль над инфраструктурой — данные никогда не покидают вашу сеть</span>
+          </div>
+          <div class="priv-check rv d5">
+            <div class="check-ico">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+            <span class="priv-check-txt">Идеально для юридических, налоговых и корпоративных документов с требованиями конфиденциальности</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="rv d2">
+        <div class="srv-diagram">
+          <div class="srv-header">
+            <div class="srv-ico">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              </svg>
+            </div>
+            <div class="srv-header-txt">
+              <div class="srv-header-title">Ваш сервер</div>
+              <div class="srv-header-sub">Docker · Изолированные контейнеры</div>
+            </div>
+          </div>
+          <div class="srv-rows">
+            <div class="srv-row">
+              <span class="led led-g"></span>
+              <span class="srv-row-name">React Frontend</span>
+              <span class="srv-row-tag">:3000</span>
+            </div>
+            <div class="srv-row">
+              <span class="led led-b"></span>
+              <span class="srv-row-name">FastAPI Backend</span>
+              <span class="srv-row-tag">:8000</span>
+            </div>
+            <div class="srv-row">
+              <span class="led led-g"></span>
+              <span class="srv-row-name">ChromaDB</span>
+              <span class="srv-row-tag">Векторный поиск</span>
+            </div>
+            <div class="srv-row">
+              <span class="led led-y"></span>
+              <span class="srv-row-name">Ollama + Gemma 3n</span>
+              <span class="srv-row-tag">Локальный LLM</span>
+            </div>
+            <div class="srv-row">
+              <span class="led led-b"></span>
+              <span class="srv-row-name">PostgreSQL</span>
+              <span class="srv-row-tag">:5432</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════
+     TECH
+══════════════════════════════════ -->
+<section id="tech">
+  <div class="wrap">
+    <div class="tech-lbl rv">Технологический стек</div>
+    <div class="tech-row rv d1">
+      <div class="tech-chip">⚛️ React 19</div>
+      <div class="tech-chip">⚡ FastAPI</div>
+      <div class="tech-chip">🦙 Ollama</div>
+      <div class="tech-chip">🗄️ PostgreSQL</div>
+      <div class="tech-chip">🔵 ChromaDB</div>
+      <div class="tech-chip">🐋 Docker</div>
+      <div class="tech-chip">🐍 Python 3.12</div>
+      <div class="tech-chip">💎 Gemma 3n</div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════
+     LANGUAGES
+══════════════════════════════════ -->
+<section id="lang">
+  <div class="wrap">
+    <div class="sec-label rv" style="justify-content:center">Мультиязычность</div>
+    <h2 class="sec-title rv d1" style="text-align:center">Говорит на вашем языке</h2>
+    <div class="lang-row">
+      <div class="lang-chip rv d1">
+        <span class="lang-flag">🇷🇺</span>
+        <span>Русский</span>
+      </div>
+      <div class="lang-chip rv d2">
+        <span class="lang-flag">🇺🇿</span>
+        <span>Ўзбекча</span>
+      </div>
+      <div class="lang-chip rv d3">
+        <span class="lang-flag">🇹🇯</span>
+        <span>Тоҷикӣ</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════
+     CTA
+══════════════════════════════════ -->
+<section id="cta">
+  <div class="wrap">
+    <div class="cta-inner">
+      <div class="sec-label rv" style="justify-content:center; color:rgba(197,160,89,.8)">Начните прямо сейчас</div>
+      <h2 class="cta-title rv d1">Разверните <span class="accent">ILM</span><br>за 5 минут</h2>
+      <p class="cta-desc rv d2">
+        Один Docker Compose файл — и ваш локальный AI-ассистент для документов готов к работе.
+      </p>
+      <div class="cta-btns rv d3">
+        <a href="#" class="btn-primary">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M5 3l14 9-14 9V3z"/>
+          </svg>
+          Начать бесплатно
+        </a>
+        <a href="#" class="btn-outline-white">Документация →</a>
+      </div>
+      <div class="cta-cmd rv d4">
+        <span style="color:rgba(255,255,255,.35)">$</span>
+        <span>docker compose up -d</span>
+        <button class="cta-cmd-copy" id="copyBtn" title="Копировать" aria-label="Копировать">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════
+     FOOTER
+══════════════════════════════════ -->
+<footer>
+  <div class="wrap">
+    <div class="foot-row">
+      <div>
+        <a href="#" class="logo" style="margin-bottom:.3rem;display:inline-flex">
+          <div class="logo-icon" style="width:28px;height:28px">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2">
+              <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+              <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+            </svg>
+          </div>
+          <span class="logo-name" style="font-size:1.1rem">ILM</span>
+        </a>
+        <div class="foot-copy" style="margin-top:.3rem">© 2024 ILM Platform · Все права защищены</div>
+      </div>
+      <div class="foot-links">
+        <a href="#">Документация</a>
+        <a href="#">Документация</a>
+        <a href="#">Возможности</a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<!-- ══════════════════════════════════
+     SCRIPTS
+══════════════════════════════════ -->
+<script>
+  // Scroll reveal
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('on'); });
+  }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+  document.querySelectorAll('.rv').forEach(el => obs.observe(el));
+
+  // Chat demo
+  const typing = document.getElementById('typing');
+  const aiResp = document.getElementById('ai-resp');
+  setTimeout(() => {
+    typing.style.display = 'flex';
+    setTimeout(() => {
+      typing.style.display = 'none';
+      aiResp.style.cssText = 'display:block;opacity:0;transform:translateY(8px);transition:opacity .45s,transform .45s';
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        aiResp.style.opacity = '1';
+        aiResp.style.transform = 'translateY(0)';
+      }));
+    }, 2500);
+  }, 1000);
+
+  // Copy command
+  document.getElementById('copyBtn').addEventListener('click', function() {
+    navigator.clipboard.writeText('docker compose up -d').then(() => {
+      this.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>';
+      setTimeout(() => {
+        this.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+      }, 1800);
+    });
+  });
+</script>
+
+</body>
+</html>
