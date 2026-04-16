@@ -2,26 +2,13 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Outlet, useNavigate, useParams } from 'react-router-dom';
 
 import { useNotebookHeader } from '../components/layout/NotebookHeaderContext';
+import { useLocale } from '../i18n';
+import { formatLocaleDate } from '../lib/locale';
 import { notebooksService } from '../services/notebooksService';
 import { notesService } from '../services/notesService';
 import { sourcesService } from '../services/sourcesService';
 
 const ACTIVE_NOTEBOOK_STORAGE_KEY = 'knowledgeai.activeNotebookId';
-
-const formatNotebookDate = (value) => {
-  if (!value) return '—';
-
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return '—';
-
-  return new Intl.DateTimeFormat('ru-RU', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(parsed);
-};
 
 const resolveLatestNotebookActivity = (notebook, sources, notes) => {
   const candidates = [notebook?.created_at];
@@ -46,6 +33,7 @@ const resolveLatestNotebookActivity = (notebook, sources, notes) => {
 const NotebookLayout = () => {
   const { notebookId } = useParams();
   const navigate = useNavigate();
+  const { locale, t } = useLocale();
   const [notebook, setNotebook] = useState(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -90,7 +78,7 @@ const NotebookLayout = () => {
         console.error('Failed to fetch notebook', fetchError);
         setNotebook(null);
         setLastUpdatedAt(null);
-        setError(fetchError.response?.data?.detail || 'Не удалось загрузить блокнот.');
+        setError(fetchError.response?.data?.detail || t('notebookLayout.loadFailed'));
       } finally {
         if (isMounted) {
           setIsLoading(false);
@@ -103,7 +91,7 @@ const NotebookLayout = () => {
     return () => {
       isMounted = false;
     };
-  }, [notebookId]);
+  }, [notebookId, t]);
 
   const contextValue = useMemo(
     () => ({ notebook, isLoading, error, lastUpdatedAt }),
@@ -118,32 +106,44 @@ const NotebookLayout = () => {
 
     setNotebookHeader({
       id: notebookId,
-      name: notebook.name || 'Блокнот',
+      name: notebook.name || t('notebookLayout.defaultName'),
       description: notebook.description || '',
-      createdAtText: formatNotebookDate(notebook.created_at),
-      updatedAtText: formatNotebookDate(lastUpdatedAt || notebook.created_at),
-      domainProfile: notebook.domain_profile || '—',
+      createdAtText: formatLocaleDate(notebook.created_at, locale, {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      }, '—'),
+      updatedAtText: formatLocaleDate(lastUpdatedAt || notebook.created_at, locale, {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      }, '—'),
+      domainProfile: notebook.domain_profile || t('notebookLayout.domainProfileFallback'),
     });
 
     return () => {
       setNotebookHeader(null);
     };
-  }, [notebook, notebookId, lastUpdatedAt, setNotebookHeader]);
+  }, [locale, notebook, notebookId, lastUpdatedAt, setNotebookHeader, t]);
 
   const handleDeleteNotebook = useCallback(async () => {
     if (!notebookId) return;
-    if (!window.confirm('Удалить блокнот и все его источники, заметки и историю чата?')) return;
+    if (!window.confirm(t('notebookLayout.deleteConfirm'))) return;
     try {
       setDeleting(true);
       await notebooksService.delete(notebookId);
       navigate('/notebooks', { replace: true });
     } catch (deleteError) {
       console.error('Failed to delete notebook', deleteError);
-      alert(deleteError.response?.data?.detail || 'Не удалось удалить блокнот.');
+      alert(deleteError.response?.data?.detail || t('notebookLayout.deleteFailed'));
     } finally {
       setDeleting(false);
     }
-  }, [notebookId, navigate]);
+  }, [notebookId, navigate, t]);
 
   useEffect(() => {
     setNotebookActions({
@@ -151,14 +151,14 @@ const NotebookLayout = () => {
       onDelete: handleDeleteNotebook,
       archiveDisabled: true,
       deleteDisabled: deleting,
-      archiveTitle: 'Архивация пока не поддерживается',
-      deleteTitle: deleting ? 'Удаление...' : 'Удалить блокнот',
+      archiveTitle: t('notebookLayout.archiveUnsupported'),
+      deleteTitle: deleting ? t('notebookLayout.deleting') : t('notebookLayout.deleteNotebook'),
     });
 
     return () => {
       setNotebookActions(null);
     };
-  }, [setNotebookActions, handleDeleteNotebook, deleting]);
+  }, [setNotebookActions, handleDeleteNotebook, deleting, t]);
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-6">

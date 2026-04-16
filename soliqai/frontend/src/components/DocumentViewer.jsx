@@ -73,7 +73,7 @@ const DocumentViewer = ({ docId, docName, chunkId, page, onClose }) => {
         if (contextRes.status === 'fulfilled' && contextRes.value?.data) {
           setChunkContext(contextRes.value.data);
         }
-      } catch (e) {
+      } catch {
         if (!cancelled) setError('Ошибка загрузки');
       } finally {
         if (!cancelled) setLoading(false);

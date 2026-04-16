@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, Paperclip, Shield, ThumbsDown, ThumbsUp, User } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { chatService } from '../services/chatService';
@@ -6,31 +6,13 @@ import { Button } from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import DocumentViewer from '../components/DocumentViewer';
 import { cn } from '../lib/utils';
-
-const INITIAL_ASSISTANT_MESSAGE = {
-    role: 'assistant',
-    content: 'Здравствуйте! Я KnowledgeAI, ваш помощник по работе с источниками. Задавайте вопросы.',
-};
-
-const QUICK_QUESTIONS = [
-    'Сделай краткое summary загруженных источников',
-    'Какие основные темы встречаются в документах?',
-    'Найди ключевые определения по теме',
-    'Какие источники лучше всего отвечают на этот вопрос?',
-];
+import { useLocale } from '../i18n';
+import { formatLocaleDate } from '../lib/locale';
 
 const CHAT_HISTORY_STORAGE_PREFIX = 'knowledgeai.chat.history.';
 const ACTIVE_NOTEBOOK_STORAGE_KEY = 'knowledgeai.activeNotebookId';
 const MAX_PERSISTED_MESSAGES = 100;
 const PENDING_MESSAGE_TTL_MS = 600000; // 10 минут — LLM отвечает до 5+ мин
-const PENDING_PLACEHOLDER_TEXT = 'Думаю...';
-const INTERRUPTED_PENDING_TEXT = 'Запрос был прерван при смене раздела. Отправьте вопрос снова.';
-const MODEL_OPTIONS = [
-    { value: 'default', label: 'Базовая модель' },
-    { value: 'balanced', label: 'Сбалансированная' },
-    { value: 'deep', label: 'Глубокий анализ' },
-];
-
 const resolveCurrentUsername = () => {
     if (typeof window === 'undefined') return 'anonymous';
     const token = localStorage.getItem('token');
@@ -98,13 +80,13 @@ const normalizeMessage = (message) => {
     return normalized;
 };
 
-const normalizeMessages = (messages) => {
+const normalizeMessages = (messages, initialAssistantMessage) => {
     const sanitized = Array.isArray(messages)
         ? messages.map(normalizeMessage).filter(Boolean)
         : [];
 
-    if (sanitized.length === 0) return [INITIAL_ASSISTANT_MESSAGE];
-    if (sanitized[0].role !== 'assistant') return [INITIAL_ASSISTANT_MESSAGE, ...sanitized];
+    if (sanitized.length === 0) return [initialAssistantMessage];
+    if (sanitized[0].role !== 'assistant') return [initialAssistantMessage, ...sanitized];
     return sanitized;
 };
 
@@ -140,7 +122,7 @@ const removePendingMessageByRequestId = (messages, requestId) => {
     });
 };
 
-const resolvePendingMessages = (messages) => {
+const resolvePendingMessages = (messages, interruptedText) => {
     const now = Date.now();
     let changed = false;
 
@@ -151,35 +133,35 @@ const resolvePendingMessages = (messages) => {
         changed = true;
         return {
             role: 'assistant',
-            content: INTERRUPTED_PENDING_TEXT,
+            content: interruptedText,
         };
     });
 
     return { messages: updated, changed };
 };
 
-const loadMessagesFromStorage = (storageKey) => {
-    if (typeof window === 'undefined') return [INITIAL_ASSISTANT_MESSAGE];
+const loadMessagesFromStorage = (storageKey, initialAssistantMessage, interruptedText) => {
+    if (typeof window === 'undefined') return [initialAssistantMessage];
 
     try {
         const raw = localStorage.getItem(storageKey);
-        if (!raw) return [INITIAL_ASSISTANT_MESSAGE];
-        const normalized = normalizeMessages(JSON.parse(raw));
-        const { messages: resolved, changed } = resolvePendingMessages(normalized);
+        if (!raw) return [initialAssistantMessage];
+        const normalized = normalizeMessages(JSON.parse(raw), initialAssistantMessage);
+        const { messages: resolved, changed } = resolvePendingMessages(normalized, interruptedText);
         if (changed) {
             localStorage.setItem(storageKey, JSON.stringify(resolved));
         }
         return resolved;
     } catch {
-        return [INITIAL_ASSISTANT_MESSAGE];
+        return [initialAssistantMessage];
     }
 };
 
-const persistMessagesToStorage = (storageKey, messages) => {
+const persistMessagesToStorage = (storageKey, messages, initialAssistantMessage) => {
     if (typeof window === 'undefined') return;
 
     try {
-        const normalized = normalizeMessages(messages).slice(-MAX_PERSISTED_MESSAGES);
+        const normalized = normalizeMessages(messages, initialAssistantMessage).slice(-MAX_PERSISTED_MESSAGES);
         localStorage.setItem(storageKey, JSON.stringify(normalized));
     } catch (error) {
         console.error('Failed to persist chat history', error);
@@ -251,13 +233,13 @@ const MarkdownContent = ({ content }) => {
     );
 };
 
-const formatTodayLabel = () => {
+const formatTodayLabel = (locale, t) => {
     const date = new Date();
-    const formatted = new Intl.DateTimeFormat('en-US', {
+    const formatted = formatLocaleDate(date, locale, {
         month: 'long',
         day: 'numeric',
-    }).format(date);
-    return `Today, ${formatted}`;
+    });
+    return t('chat.today', { date: formatted });
 };
 
 const resolveNotebookId = (notebookId) => {
@@ -269,18 +251,28 @@ const resolveNotebookId = (notebookId) => {
     return storedValue ? Number(storedValue) : null;
 };
 
-const formatNotebookLabel = (notebookId) => {
-    if (notebookId == null) return 'all sources';
+const formatNotebookLabel = (notebookId, t) => {
+    if (notebookId == null) return t('chat.allSources');
     return String(notebookId);
 };
 
 const ChatPage = ({ notebookId, mode = 'page' }) => {
-    const { register, handleSubmit, reset } = useForm();
+    const { locale, t } = useLocale();
+    const { register, handleSubmit: formHandleSubmit, reset } = useForm();
     const effectiveNotebookId = resolveNotebookId(notebookId);
     const chatScope = effectiveNotebookId == null ? 'global' : `notebook.${effectiveNotebookId}`;
     const chatStorageKey = getChatStorageKey(chatScope);
-    const [messages, setMessages] = useState(() => loadMessagesFromStorage(chatStorageKey));
-    const [selectedModel, setSelectedModel] = useState(MODEL_OPTIONS[0].value);
+    const initialAssistantMessage = useMemo(() => ({
+        role: 'assistant',
+        content: t('chat.welcome'),
+    }), [t]);
+    const quickQuestions = useMemo(() => ([
+        t('chat.quickQuestions.summary'),
+        t('chat.quickQuestions.topics'),
+        t('chat.quickQuestions.definitions'),
+        t('chat.quickQuestions.bestSources'),
+    ]), [t]);
+    const [messages, setMessages] = useState(() => loadMessagesFromStorage(chatStorageKey, initialAssistantMessage, t('chat.interrupted')));
     const [viewerSource, setViewerSource] = useState(null);
     const messagesEndRef = useRef(null);
     const isPageLeavingRef = useRef(false);
@@ -298,12 +290,12 @@ const ChatPage = ({ notebookId, mode = 'page' }) => {
     }, [messages]);
 
     useEffect(() => {
-        setMessages(loadMessagesFromStorage(chatStorageKey));
-    }, [chatStorageKey]);
+        setMessages(loadMessagesFromStorage(chatStorageKey, initialAssistantMessage, t('chat.interrupted')));
+    }, [chatStorageKey, initialAssistantMessage, t]);
 
     useEffect(() => {
-        persistMessagesToStorage(chatStorageKey, messages);
-    }, [chatStorageKey, messages]);
+        persistMessagesToStorage(chatStorageKey, messages, initialAssistantMessage);
+    }, [chatStorageKey, initialAssistantMessage, messages]);
 
     useEffect(() => {
         if (notebookId !== undefined) return;
@@ -312,13 +304,13 @@ const ChatPage = ({ notebookId, mode = 'page' }) => {
             if (event.key === ACTIVE_NOTEBOOK_STORAGE_KEY) {
                 const nextNotebookId = resolveNotebookId(undefined);
                 const nextScope = nextNotebookId == null ? 'global' : `notebook.${nextNotebookId}`;
-                setMessages(loadMessagesFromStorage(getChatStorageKey(nextScope)));
+                setMessages(loadMessagesFromStorage(getChatStorageKey(nextScope), initialAssistantMessage, t('chat.interrupted')));
             }
         };
 
         window.addEventListener('storage', handleStorage);
         return () => window.removeEventListener('storage', handleStorage);
-    }, [notebookId]);
+    }, [initialAssistantMessage, notebookId, t]);
 
     useEffect(() => {
         isPageLeavingRef.current = false;
@@ -345,7 +337,7 @@ const ChatPage = ({ notebookId, mode = 'page' }) => {
         const userMessage = { role: 'user', content: cleanMessage };
         const pendingMessage = {
             role: 'assistant',
-            content: PENDING_PLACEHOLDER_TEXT,
+            content: t('chat.pending'),
             pending: true,
             requestId,
             createdAt: getCreatedAtFromRequestId(requestId),
@@ -353,7 +345,7 @@ const ChatPage = ({ notebookId, mode = 'page' }) => {
 
         setMessages((prev) => {
             const updated = [...prev, userMessage, pendingMessage];
-            persistMessagesToStorage(chatStorageKey, updated);
+            persistMessagesToStorage(chatStorageKey, updated, initialAssistantMessage);
             return updated;
         });
         reset();
@@ -367,9 +359,9 @@ const ChatPage = ({ notebookId, mode = 'page' }) => {
                 logId: response.data.log_id,
             };
 
-            const stored = loadMessagesFromStorage(chatStorageKey);
+            const stored = loadMessagesFromStorage(chatStorageKey, initialAssistantMessage, t('chat.interrupted'));
             const storageUpdated = replacePendingMessageByRequestId(stored, requestId, botMessage);
-            persistMessagesToStorage(chatStorageKey, storageUpdated);
+            persistMessagesToStorage(chatStorageKey, storageUpdated, initialAssistantMessage);
             setMessages((prev) => replacePendingMessageByRequestId(prev, requestId, botMessage));
         } catch (error) {
             console.error(error);
@@ -379,27 +371,31 @@ const ChatPage = ({ notebookId, mode = 'page' }) => {
                 error?.code === 'ERR_CANCELED' ||
                 error?.name === 'CanceledError';
             if (isInterruptedRequest) {
-                const stored = loadMessagesFromStorage(chatStorageKey);
+                const stored = loadMessagesFromStorage(chatStorageKey, initialAssistantMessage, t('chat.interrupted'));
                 const storageUpdated = removePendingMessageByRequestId(stored, requestId);
-                persistMessagesToStorage(chatStorageKey, storageUpdated);
+                persistMessagesToStorage(chatStorageKey, storageUpdated, initialAssistantMessage);
                 setMessages((prev) => removePendingMessageByRequestId(prev, requestId));
                 return;
             }
             // Check if it's an authentication error
             const isAuthError = error.response?.status === 403 || error.response?.status === 401;
             const errorContent = isAuthError
-                ? 'Ваша сессия истекла. Пожалуйста, войдите снова.'
-                : 'Извините, произошла ошибка при обработке вашего запроса.';
+                ? t('chat.authExpired')
+                : t('chat.requestFailed');
             const errorMessage = { role: 'assistant', content: errorContent };
-            const stored = loadMessagesFromStorage(chatStorageKey);
+            const stored = loadMessagesFromStorage(chatStorageKey, initialAssistantMessage, t('chat.interrupted'));
             const storageUpdated = replacePendingMessageByRequestId(stored, requestId, errorMessage);
-            persistMessagesToStorage(chatStorageKey, storageUpdated);
+            persistMessagesToStorage(chatStorageKey, storageUpdated, initialAssistantMessage);
             setMessages((prev) => replacePendingMessageByRequestId(prev, requestId, errorMessage));
         }
     };
 
     const onSubmit = async (data) => {
         await submitMessage(data.message);
+    };
+
+    const handleFormSubmit = (event) => {
+        void formHandleSubmit(onSubmit)(event);
     };
 
     const handleQuickQuestion = async (question) => {
@@ -409,7 +405,7 @@ const ChatPage = ({ notebookId, mode = 'page' }) => {
 
     const handleClearChat = () => {
         if (hasPendingMessage) return;
-        setMessages([INITIAL_ASSISTANT_MESSAGE]);
+        setMessages([initialAssistantMessage]);
         reset();
     };
 
@@ -434,16 +430,16 @@ const ChatPage = ({ notebookId, mode = 'page' }) => {
         return (
             <details className="mt-3 rounded-lg border border-slate-200 bg-white/70 px-3 py-2 text-xs text-slate-500" style={{ containIntrinsicSize: 'auto', maxWidth: '100%' }}>
                 <summary className="cursor-pointer list-none font-semibold uppercase tracking-[0.08em] text-[#1f3a60]">
-                    Sources ({sources.length})
+                    {t('chat.sources')} ({sources.length})
                 </summary>
                 <div className="mt-2 space-y-1">
                     {sources.map((source, sourceIdx) => {
                         if (typeof source === 'string') {
-                            return <div key={sourceIdx} className="truncate">Source: {source}</div>;
+                            return <div key={sourceIdx} className="truncate">{t('chat.sourceItem', { value: source })}</div>;
                         }
 
-                        const docName = source.doc_name || `Source #${source.doc_id ?? 'N/A'}`;
-                        const page = source.page ? `, стр. ${source.page}` : '';
+                        const docName = source.doc_name || t('chat.sourceFallback', { id: source.doc_id ?? 'N/A' });
+                        const page = source.page ? t('chat.sourcePage', { page: source.page }) : '';
 
                         return (
                             <button
@@ -475,25 +471,25 @@ const ChatPage = ({ notebookId, mode = 'page' }) => {
                     {isNotebookPanel ? (
                         <>
                             <div>
-                                <h3 className="text-lg font-semibold text-slate-900">Чат с блокнотом</h3>
-                                <p className="mt-1 text-sm text-slate-500">Задавайте вопросы только по материалам текущего блокнота.</p>
+                                <h3 className="text-lg font-semibold text-slate-900">{t('chat.notebookChatTitle')}</h3>
+                                <p className="mt-1 text-sm text-slate-500">{t('chat.notebookChatDescription')}</p>
                             </div>
-                            <Button type="button" variant="outline" size="sm" disabled title="История сессий пока недоступна">
-                                Сессии
+                            <Button type="button" variant="outline" size="sm" disabled title={t('chat.sessionsUnavailable')}>
+                                {t('chat.sessions')}
                             </Button>
                         </>
                     ) : (
                         <>
                             <div className="flex flex-wrap items-center gap-2">
                                 <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
-                                    {formatTodayLabel()}
+                                    {formatTodayLabel(locale, t)}
                                 </div>
                                 <div className="rounded-full bg-[#1f3a60]/10 px-3 py-1 text-xs font-semibold text-[#1f3a60]">
-                                    notebook: {formatNotebookLabel(effectiveNotebookId)}
+                                    {t('chat.notebookLabel', { value: formatNotebookLabel(effectiveNotebookId, t) })}
                                 </div>
                             </div>
                             <Button variant="ghost" size="sm" onClick={handleClearChat} disabled={hasPendingMessage}>
-                                Очистить чат
+                                {t('chat.clear')}
                             </Button>
                         </>
                     )}
@@ -505,9 +501,9 @@ const ChatPage = ({ notebookId, mode = 'page' }) => {
                             <div className="rounded-2xl bg-[#1f3a60]/10 p-4 text-[#1f3a60]">
                                 <Shield className="h-6 w-6" />
                             </div>
-                            <h4 className="mt-4 text-lg font-semibold text-slate-900">Диалог еще не начат</h4>
+                            <h4 className="mt-4 text-lg font-semibold text-slate-900">{t('chat.emptyTitle')}</h4>
                             <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">
-                                Спросите о ключевых фактах, выводах или спорных местах в источниках этого блокнота.
+                                {t('chat.emptyDescription')}
                             </p>
                         </div>
                     ) : (
@@ -549,7 +545,7 @@ const ChatPage = ({ notebookId, mode = 'page' }) => {
                                                         'rounded-md p-1.5 transition',
                                                         msg.feedback === 'up' ? 'bg-green-100 text-green-600' : 'text-slate-400 hover:bg-slate-100',
                                                     )}
-                                                    title="Good answer"
+                                                    title={t('chat.feedbackGood')}
                                                 >
                                                     <ThumbsUp className="h-4 w-4" />
                                                 </button>
@@ -559,7 +555,7 @@ const ChatPage = ({ notebookId, mode = 'page' }) => {
                                                         'rounded-md p-1.5 transition',
                                                         msg.feedback === 'down' ? 'bg-red-100 text-red-600' : 'text-slate-400 hover:bg-slate-100',
                                                     )}
-                                                    title="Bad answer"
+                                                    title={t('chat.feedbackBad')}
                                                 >
                                                     <ThumbsDown className="h-4 w-4" />
                                                 </button>
@@ -583,11 +579,11 @@ const ChatPage = ({ notebookId, mode = 'page' }) => {
                 <div className="border-t border-slate-200 bg-white px-4 py-4 sm:px-6">
                     {isNotebookPanel ? (
                         <>
-                            <form onSubmit={handleSubmit(onSubmit)} className="relative">
+                            <form onSubmit={handleFormSubmit} className="relative">
                                 <Paperclip className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                                 <Input
                                     className="h-12 rounded-2xl border-slate-300 bg-slate-50 pl-10 pr-14 focus:bg-white"
-                                    placeholder="Спросите о материалах этого блокнота..."
+                                    placeholder={t('chat.notebookPlaceholder')}
                                     autoComplete="off"
                                     {...register('message')}
                                 />
@@ -604,7 +600,7 @@ const ChatPage = ({ notebookId, mode = 'page' }) => {
                     ) : (
                         <>
                             <div className="mb-3 flex flex-wrap gap-2">
-                                {QUICK_QUESTIONS.map((question) => (
+                                {quickQuestions.map((question) => (
                                     <button
                                         key={question}
                                         type="button"
@@ -617,11 +613,11 @@ const ChatPage = ({ notebookId, mode = 'page' }) => {
                                 ))}
                             </div>
 
-                            <form onSubmit={handleSubmit(onSubmit)} className="relative">
+                            <form onSubmit={handleFormSubmit} className="relative">
                                 <Paperclip className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                                 <Input
                                     className="h-12 rounded-xl border-slate-300 bg-slate-50 pl-10 pr-14 focus:bg-white"
-                                    placeholder="Введите вопрос по выбранным источникам..."
+                                    placeholder={t('chat.pagePlaceholder')}
                                     autoComplete="off"
                                     {...register('message')}
                                 />
@@ -636,7 +632,7 @@ const ChatPage = ({ notebookId, mode = 'page' }) => {
                             </form>
 
                             <p className="mt-2 text-center text-[11px] font-medium text-slate-400">
-                                KnowledgeAI может ошибаться. Проверяйте важную информацию по исходным материалам.
+                                {t('chat.disclaimer')}
                             </p>
                         </>
                     )}

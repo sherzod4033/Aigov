@@ -15,6 +15,8 @@ import {
 import api from '../services/api';
 import { Button } from '../components/ui/Button';
 import { cn } from '../lib/utils';
+import { useLocale } from '../i18n';
+import { formatDocumentLanguage, formatLocaleDate } from '../lib/locale';
 
 const ALLOWED_EXTENSIONS = ['pdf', 'docx', 'txt'];
 const ALLOWED_MIME_TYPES = new Set([
@@ -29,24 +31,6 @@ const ALLOWED_MIME_TYPES = new Set([
 const normalizeMimeType = (mimeType) => String(mimeType || '').split(';', 1)[0].trim().toLowerCase();
 
 const STATUS_ORDER = ['all', 'ready', 'indexing', 'error'];
-
-const STATUS_META = {
-    ready: {
-        label: 'Готово',
-        badgeClass: 'bg-emerald-100 text-emerald-700',
-        dotClass: 'bg-emerald-500',
-    },
-    indexing: {
-        label: 'Индексация',
-        badgeClass: 'bg-amber-100 text-amber-700',
-        dotClass: 'bg-amber-500',
-    },
-    error: {
-        label: 'Ошибка',
-        badgeClass: 'bg-red-100 text-red-700',
-        dotClass: 'bg-red-500',
-    },
-};
 
 const ACTIVE_NOTEBOOK_STORAGE_KEY = 'knowledgeai.activeNotebookId';
 
@@ -67,23 +51,6 @@ const formatSize = (size) => {
     return `${(kb / 1024).toFixed(1)} MB`;
 };
 
-const formatDate = (value) => {
-    if (!value) return '-';
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) return '-';
-    return new Intl.DateTimeFormat('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-    }).format(parsed);
-};
-
-const getLanguageTag = (language) => {
-    const normalized = String(language || '').trim().toUpperCase();
-    if (normalized === 'TJ') return { text: 'TJ', className: 'bg-yellow-100 text-yellow-800' };
-    return { text: 'RU', className: 'bg-blue-100 text-blue-700' };
-};
-
 const resolveNotebookId = (notebookId) => {
     if (notebookId !== undefined) {
         return notebookId == null ? null : Number(notebookId);
@@ -94,6 +61,7 @@ const resolveNotebookId = (notebookId) => {
 };
 
 const AdminDocumentsPage = ({ notebookId }) => {
+    const { locale, t } = useLocale();
     const [documents, setDocuments] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isUploading, setIsUploading] = useState(false);
@@ -118,15 +86,28 @@ const AdminDocumentsPage = ({ notebookId }) => {
 
     const {
         register,
-        handleSubmit,
         reset,
         watch,
     } = useForm();
 
     const selectedFile = watch('file')?.[0];
     const effectiveNotebookId = resolveNotebookId(notebookId);
+    const statusMeta = useMemo(() => ({
+        ready: {
+            label: t('documents.status.ready'),
+            badgeClass: 'bg-emerald-100 text-emerald-700',
+        },
+        indexing: {
+            label: t('documents.status.indexing'),
+            badgeClass: 'bg-amber-100 text-amber-700',
+        },
+        error: {
+            label: t('documents.status.error'),
+            badgeClass: 'bg-red-100 text-red-700',
+        },
+    }), [t]);
 
-    const fetchDocuments = async () => {
+    const fetchDocuments = useCallback(async () => {
         try {
             const response = await api.get(`/sources/${effectiveNotebookId ? `?notebook_id=${effectiveNotebookId}` : ''}`);
             setDocuments(response.data || []);
@@ -135,7 +116,7 @@ const AdminDocumentsPage = ({ notebookId }) => {
         } finally {
             setIsLoading(false);
         }
-    };
+    }, [effectiveNotebookId]);
 
     const validateFile = useCallback((file) => {
         const ext = file.name.split('.').pop()?.toLowerCase() || '';
@@ -175,14 +156,14 @@ const AdminDocumentsPage = ({ notebookId }) => {
         const invalidFiles = files.filter((f) => !validateFile(f));
 
         if (invalidFiles.length > 0) {
-            setUploadError(`Неподдерживаемые файлы: ${invalidFiles.map((f) => f.name).join(', ')}`);
+            setUploadError(t('documents.unsupportedFiles', { files: invalidFiles.map((f) => f.name).join(', ') }));
         }
 
         if (validFiles.length > 0) {
             setDraggedFiles(validFiles);
             setUploadError('');
         }
-    }, [validateFile]);
+    }, [t, validateFile]);
 
     const uploadFiles = useCallback(async (files) => {
         if (!files || files.length === 0) return;
@@ -203,7 +184,7 @@ const AdminDocumentsPage = ({ notebookId }) => {
                 });
                 return { success: true, name: file.name };
             } catch (error) {
-                return { success: false, name: file.name, error: error.response?.data?.detail || 'Ошибка загрузки' };
+                return { success: false, name: file.name, error: error.response?.data?.detail || t('documents.uploadError') };
             }
         });
 
@@ -212,7 +193,7 @@ const AdminDocumentsPage = ({ notebookId }) => {
 
         if (failed.length > 0) {
             setUploadError(
-                `Не удалось загрузить: ${failed.map((f) => `${f.name}${f.error ? ` (${f.error})` : ''}`).join(', ')}`
+                t('notebook.uploadFailed', { files: failed.map((f) => `${f.name}${f.error ? ` (${f.error})` : ''}`).join(', ') })
             );
         }
 
@@ -220,7 +201,7 @@ const AdminDocumentsPage = ({ notebookId }) => {
         reset();
         await fetchDocuments();
         setIsUploading(false);
-    }, [effectiveNotebookId, reset]);
+    }, [effectiveNotebookId, fetchDocuments, reset, t]);
 
     const fetchChunks = useCallback(async (docId, docName) => {
         setChunksModal({
@@ -244,10 +225,10 @@ const AdminDocumentsPage = ({ notebookId }) => {
             setChunksModal((prev) => ({
                 ...prev,
                 isLoading: false,
-                error: error.response?.data?.detail || 'Не удалось загрузить фрагменты',
+                error: error.response?.data?.detail || t('documents.chunksLoadFailed'),
             }));
         }
-    }, []);
+    }, [t]);
 
     const closeChunksModal = useCallback(() => {
         setChunksModal({
@@ -262,7 +243,7 @@ const AdminDocumentsPage = ({ notebookId }) => {
 
     useEffect(() => {
         fetchDocuments();
-    }, [effectiveNotebookId]);
+    }, [fetchDocuments]);
 
     const stats = useMemo(() => {
         const counts = {
@@ -317,47 +298,15 @@ const AdminDocumentsPage = ({ notebookId }) => {
         return sorted;
     }, [filteredDocuments, sortField, sortOrder]);
 
-    const onUpload = async (data) => {
-        const selected = data.file?.[0];
-        if (!selected) return;
-
-        if (!validateFile(selected)) {
-            setUploadError('Разрешенные форматы: PDF, DOCX, TXT. Пожалуйста, выберите допустимый файл.');
-            return;
-        }
-
-        setIsUploading(true);
-        setUploadError('');
-
-        const formData = new FormData();
-        formData.append('file', selected);
-        if (effectiveNotebookId) {
-            formData.append('notebook_id', String(effectiveNotebookId));
-        }
-
-        try {
-            await api.post('/sources/upload', formData, {
-                headers: { 'Content-Type': 'multipart/form-data' },
-            });
-            reset();
-            await fetchDocuments();
-        } catch (error) {
-            console.error('Upload failed:', error);
-            setUploadError(error.response?.data?.detail || 'Не удалось загрузить source');
-        } finally {
-            setIsUploading(false);
-        }
-    };
-
     const onDelete = async (id) => {
-        if (!window.confirm('Вы уверены, что хотите удалить этот source?')) return;
+        if (!window.confirm(t('documents.deleteConfirm'))) return;
 
         try {
             await api.delete(`/sources/${id}`);
             setDocuments((prev) => prev.filter((doc) => doc.id !== id));
         } catch (error) {
             console.error('Delete failed:', error);
-            alert('Не удалось удалить source');
+            alert(t('documents.deleteFailed'));
         }
     };
 
@@ -386,14 +335,14 @@ const AdminDocumentsPage = ({ notebookId }) => {
                         <CloudUpload className={cn('h-7 w-7', isDragActive && 'animate-bounce')} />
                     </div>
                     <h3 className="text-2xl font-bold text-slate-800">
-                        {isDragActive ? 'Отпустите файлы для загрузки' : 'Перетащите файлы сюда'}
+                        {isDragActive ? t('documents.dropActive') : t('documents.dropIdle')}
                     </h3>
-                    <p className="mt-1 text-sm text-slate-500">Поддерживаемые форматы: PDF, DOCX, TXT (Макс. 50МБ)</p>
+                    <p className="mt-1 text-sm text-slate-500">{t('documents.supportedFormats')}</p>
 
                     <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
                         <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg bg-[#c5a059] px-5 py-2 text-sm font-semibold text-white transition hover:bg-[#b18f4e]">
                             <CloudUpload className="h-4 w-4" />
-                            Выбрать файл
+                            {t('documents.chooseFile')}
                             <input
                                 type="file"
                                 multiple
@@ -412,7 +361,7 @@ const AdminDocumentsPage = ({ notebookId }) => {
                                         setDraggedFiles(valid);
                                         setUploadError('');
                                     } else if (files.length > 0) {
-                                        setUploadError('Разрешенные форматы: PDF, DOCX, TXT');
+                                        setUploadError(t('documents.invalidFormats'));
                                     }
                                 }}
                             />
@@ -426,12 +375,12 @@ const AdminDocumentsPage = ({ notebookId }) => {
                             {isUploading ? (
                                 <>
                                     <Loader2 className="h-4 w-4 animate-spin" />
-                                    Загрузка...
+                                    {t('documents.uploadLoading')}
                                 </>
                             ) : draggedFiles.length > 1 ? (
-                                `Загрузить ${draggedFiles.length} файлов`
+                                t('documents.uploadMany', { count: draggedFiles.length })
                             ) : (
-                                'Загрузить файл'
+                                t('documents.uploadOne')
                             )}
                         </Button>
                     </div>
@@ -439,7 +388,7 @@ const AdminDocumentsPage = ({ notebookId }) => {
                     {(draggedFiles.length > 0 || selectedFile) && (
                         <div className="mt-4 rounded-lg bg-emerald-50 p-3">
                             <p className="text-sm font-semibold text-emerald-700">
-                                К загрузке: {(draggedFiles.length > 0 ? draggedFiles : selectedFile ? [selectedFile] : []).map((f) => f.name).join(', ')}
+                                {t('documents.pendingUpload', { files: (draggedFiles.length > 0 ? draggedFiles : selectedFile ? [selectedFile] : []).map((f) => f.name).join(', ') })}
                             </p>
                         </div>
                     )}
@@ -465,14 +414,14 @@ const AdminDocumentsPage = ({ notebookId }) => {
                                         : 'bg-slate-100 text-slate-600 hover:bg-slate-200',
                                 )}
                             >
-                                {status === 'all' ? 'Все' : STATUS_META[status].label}
+                                {status === 'all' ? t('documents.status.all') : statusMeta[status].label}
                                 <span className="ml-1">{stats[status]}</span>
                             </button>
                         ))}
                     </div>
 
                     <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold text-slate-500">Сортировка:</span>
+                        <span className="text-sm font-semibold text-slate-500">{t('documents.sort')}</span>
                         <select
                             value={`${sortField}-${sortOrder}`}
                             onChange={(e) => {
@@ -482,12 +431,12 @@ const AdminDocumentsPage = ({ notebookId }) => {
                             }}
                             className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 outline-none focus:border-[#1f3a60] focus:ring-1 focus:ring-[#1f3a60]"
                         >
-                            <option value="created_at-desc">Дата (Сначала новые)</option>
-                            <option value="created_at-asc">Дата (Сначала старые)</option>
-                            <option value="name-asc">Имя (А-Я)</option>
-                            <option value="name-desc">Имя (Я-А)</option>
-                            <option value="size-desc">Размер (По убыванию)</option>
-                            <option value="size-asc">Размер (По возрастанию)</option>
+                            <option value="created_at-desc">{t('documents.sortOptions.dateDesc')}</option>
+                            <option value="created_at-asc">{t('documents.sortOptions.dateAsc')}</option>
+                            <option value="name-asc">{t('documents.sortOptions.nameAsc')}</option>
+                            <option value="name-desc">{t('documents.sortOptions.nameDesc')}</option>
+                            <option value="size-desc">{t('documents.sortOptions.sizeDesc')}</option>
+                            <option value="size-asc">{t('documents.sortOptions.sizeAsc')}</option>
                         </select>
                     </div>
                 </div>
@@ -496,12 +445,12 @@ const AdminDocumentsPage = ({ notebookId }) => {
                     <table className="w-full min-w-[820px] text-left">
                         <thead className="bg-slate-50 text-xs uppercase tracking-[0.08em] text-slate-500">
                             <tr>
-                                <th className="px-5 py-3 font-semibold">Имя файла</th>
-                                <th className="px-5 py-3 font-semibold">Язык</th>
-                                <th className="px-5 py-3 font-semibold">Дата загрузки</th>
-                                <th className="px-5 py-3 font-semibold">Размер</th>
-                                <th className="px-5 py-3 font-semibold">Статус</th>
-                                <th className="px-5 py-3 text-right font-semibold">Действия</th>
+                                <th className="px-5 py-3 font-semibold">{t('documents.table.fileName')}</th>
+                                <th className="px-5 py-3 font-semibold">{t('documents.table.language')}</th>
+                                <th className="px-5 py-3 font-semibold">{t('documents.table.uploadedAt')}</th>
+                                <th className="px-5 py-3 font-semibold">{t('documents.table.size')}</th>
+                                <th className="px-5 py-3 font-semibold">{t('documents.table.status')}</th>
+                                <th className="px-5 py-3 text-right font-semibold">{t('documents.table.actions')}</th>
                             </tr>
                         </thead>
 
@@ -511,21 +460,21 @@ const AdminDocumentsPage = ({ notebookId }) => {
                                     <td colSpan="6" className="px-5 py-12 text-center text-slate-500">
                                         <div className="inline-flex items-center gap-2">
                                             <Loader2 className="h-5 w-5 animate-spin" />
-                                            Загрузка sources...
+                                            {t('documents.loading')}
                                         </div>
                                     </td>
                                 </tr>
                             ) : sortedDocuments.length === 0 ? (
                                 <tr>
                                     <td colSpan="6" className="px-5 py-12 text-center text-slate-500">
-                                        Sources не найдены.
+                                        {t('documents.empty')}
                                     </td>
                                 </tr>
                             ) : (
                                 sortedDocuments.map((doc) => {
                                     const statusKey = resolveStatus(doc.status);
-                                    const statusMeta = STATUS_META[statusKey];
-                                    const languageTag = getLanguageTag(doc.language);
+                                    const documentStatusMeta = statusMeta[statusKey];
+                                    const languageTag = formatDocumentLanguage(doc.language);
 
                                     return (
                                         <tr key={doc.id} className="border-t border-slate-100 text-sm hover:bg-slate-50/70">
@@ -548,7 +497,11 @@ const AdminDocumentsPage = ({ notebookId }) => {
                                             </td>
 
                                             <td className="px-5 py-3 text-slate-500">
-                                                {formatDate(doc.created_at)}
+                                                {formatLocaleDate(doc.created_at, locale, {
+                                                    month: 'short',
+                                                    day: 'numeric',
+                                                    year: 'numeric',
+                                                })}
                                             </td>
 
                                             <td className="px-5 py-3 text-slate-500">
@@ -556,7 +509,7 @@ const AdminDocumentsPage = ({ notebookId }) => {
                                             </td>
 
                                             <td className="px-5 py-3">
-                                                <span className={cn('inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold', statusMeta.badgeClass)}>
+                                                <span className={cn('inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold', documentStatusMeta.badgeClass)}>
                                                     {statusKey === 'indexing' ? (
                                                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
                                                     ) : statusKey === 'error' ? (
@@ -564,7 +517,7 @@ const AdminDocumentsPage = ({ notebookId }) => {
                                                     ) : (
                                                         <CheckCircle2 className="h-3.5 w-3.5" />
                                                     )}
-                                                    {statusMeta.label}
+                                                    {documentStatusMeta.label}
                                                 </span>
                                             </td>
 
@@ -574,7 +527,7 @@ const AdminDocumentsPage = ({ notebookId }) => {
                                                         type="button"
                                                         onClick={() => fetchChunks(doc.id, doc.name)}
                                                         className="rounded-md p-1.5 text-slate-500 transition hover:bg-blue-50 hover:text-blue-600"
-                                                        title="Просмотреть фрагменты"
+                                                        title={t('documents.viewChunks')}
                                                     >
                                                         <Eye className="h-4 w-4" />
                                                     </button>
@@ -582,7 +535,7 @@ const AdminDocumentsPage = ({ notebookId }) => {
                                                         type="button"
                                                         onClick={() => onDelete(doc.id)}
                                                         className="rounded-md p-1.5 text-slate-500 transition hover:bg-red-50 hover:text-red-600"
-                                                        title="Удалить"
+                                                        title={t('documents.delete')}
                                                     >
                                                         <Trash2 className="h-4 w-4" />
                                                     </button>
@@ -603,13 +556,14 @@ const AdminDocumentsPage = ({ notebookId }) => {
                     <div className="max-h-[90vh] w-full max-w-4xl overflow-hidden rounded-2xl bg-white shadow-xl">
                         <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
                             <div>
-                                <h3 className="text-lg font-bold text-slate-800">Фрагменты source</h3>
+                                <h3 className="text-lg font-bold text-slate-800">{t('documents.chunksTitle')}</h3>
                                 <p className="text-sm text-slate-500">{chunksModal.docName}</p>
                             </div>
                             <button
                                 type="button"
                                 onClick={closeChunksModal}
                                 className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+                                aria-label={t('documents.close')}
                             >
                                 <X className="h-5 w-5" />
                             </button>
@@ -619,7 +573,7 @@ const AdminDocumentsPage = ({ notebookId }) => {
                             {chunksModal.isLoading ? (
                                 <div className="flex items-center justify-center py-12 text-slate-500">
                                     <Loader2 className="h-6 w-6 animate-spin" />
-                                    <span className="ml-2">Загрузка фрагментов...</span>
+                                    <span className="ml-2">{t('documents.loadingChunks')}</span>
                                 </div>
                             ) : chunksModal.error ? (
                                 <div className="rounded-lg bg-red-50 p-4 text-center text-red-600">
@@ -627,12 +581,12 @@ const AdminDocumentsPage = ({ notebookId }) => {
                                 </div>
                             ) : chunksModal.chunks.length === 0 ? (
                                 <div className="rounded-lg bg-slate-50 p-8 text-center text-slate-500">
-                                    Фрагменты не найдены. Возможно, source еще индексируется.
+                                    {t('documents.emptyChunks')}
                                 </div>
                             ) : (
                                 <div className="space-y-4">
                                     <div className="mb-4 text-sm text-slate-500">
-                                        Всего фрагментов: <span className="font-semibold text-slate-700">{chunksModal.chunks.length}</span>
+                                        {t('documents.totalChunks', { count: chunksModal.chunks.length })}
                                     </div>
                                     {chunksModal.chunks.map((chunk, index) => (
                                         <div
@@ -641,10 +595,10 @@ const AdminDocumentsPage = ({ notebookId }) => {
                                         >
                                             <div className="mb-2 flex items-center gap-2">
                                                 <span className="rounded-full bg-[#1f3a60]/10 px-2 py-0.5 text-xs font-semibold text-[#1f3a60]">
-                                                    Страница {chunk.page || '?'}
+                                                    {t('documents.page', { page: chunk.page || '?' })}
                                                 </span>
                                                 <span className="text-xs text-slate-400">
-                                                    ID: {chunk.id}
+                                                    {t('documents.id', { id: chunk.id })}
                                                 </span>
                                             </div>
                                             <p className="text-sm leading-relaxed text-slate-700 whitespace-pre-wrap">

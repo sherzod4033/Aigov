@@ -18,23 +18,12 @@ import { Link } from 'react-router-dom';
 import { Button } from '../ui/Button';
 import Input from '../ui/Input';
 import { cn } from '../../lib/utils';
+import { useLocale } from '../../i18n';
+import { formatLocaleDate } from '../../lib/locale';
 import { notesService } from '../../services/notesService';
 import { notebooksService } from '../../services/notebooksService';
 import { sourcesService } from '../../services/sourcesService';
 import ChatPage from '../../pages/ChatPage';
-
-const formatDate = (value) => {
-  if (!value) return '—';
-
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return '—';
-
-  return new Intl.DateTimeFormat('ru-RU', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  }).format(parsed);
-};
 
 const formatSize = (size) => {
   if (!Number.isFinite(size)) return '—';
@@ -43,24 +32,24 @@ const formatSize = (size) => {
   return `${(size / (1024 * 1024)).toFixed(1)} МБ`;
 };
 
-const getSourceStatusLabel = (status) => {
+const getSourceStatusLabel = (status, t) => {
   const normalized = String(status || '').toLowerCase();
 
-  if (normalized.includes('error')) return 'Ошибка';
-  if (normalized === 'indexed' || normalized.includes('ready') || normalized.includes('done') || normalized.includes('success')) return 'Готов';
-  if (normalized.includes('index')) return 'Индексируется';
+  if (normalized.includes('error')) return t('documents.status.error');
+  if (normalized === 'indexed' || normalized.includes('ready') || normalized.includes('done') || normalized.includes('success')) return t('documents.status.ready');
+  if (normalized.includes('index')) return t('documents.status.indexing');
 
-  return 'В очереди';
+  return t('documents.status.indexing');
 };
 
-const getNotebookLabel = (source, notebookNameById) => {
-  if (source.notebook_id == null) return 'Сейчас не привязан к блокноту';
+const getNotebookLabel = (source, notebookNameById, t) => {
+  if (source.notebook_id == null) return t('notebook.notebookUnlinked');
 
-  return notebookNameById[source.notebook_id] || `Блокнот #${source.notebook_id}`;
+  return notebookNameById[source.notebook_id] || t('notebook.notebookFallback', { id: source.notebook_id });
 };
 
 /* ── Split-dropdown button (like Google NotebookLM) ─────────────────────── */
-const AddSourceSplitButton = ({ onUpload, onExisting, isLoading, uploadProgress }) => {
+const AddSourceSplitButton = ({ onUpload, onExisting, isLoading, uploadProgress, labels }) => {
   const [open, setOpen] = useState(false);
   const containerRef = useRef(null);
 
@@ -90,7 +79,7 @@ const AddSourceSplitButton = ({ onUpload, onExisting, isLoading, uploadProgress 
         ) : (
           <Plus className="h-4 w-4" />
         )}
-        {isLoading && uploadProgress ? `Загрузка ${uploadProgress}` : 'Добавить источник'}
+        {isLoading && uploadProgress ? `${labels.loading} ${uploadProgress}` : labels.addSource}
       </button>
 
       {/* Divider */}
@@ -102,7 +91,7 @@ const AddSourceSplitButton = ({ onUpload, onExisting, isLoading, uploadProgress 
         onClick={() => setOpen((prev) => !prev)}
         disabled={isLoading}
         className="flex items-center justify-center rounded-r-lg bg-[#1f3a60] px-2.5 py-2 text-white shadow-[0_8px_18px_rgba(31,58,96,0.22)] transition hover:bg-[#162945] disabled:pointer-events-none disabled:opacity-60"
-        aria-label="Открыть меню добавления источника"
+        aria-label={labels.openMenu}
         aria-expanded={open}
       >
         <ChevronDown className={cn('h-4 w-4 transition-transform duration-150', open && 'rotate-180')} />
@@ -117,7 +106,7 @@ const AddSourceSplitButton = ({ onUpload, onExisting, isLoading, uploadProgress 
             className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-sm text-slate-700 transition hover:bg-slate-50"
           >
             <Plus className="h-4 w-4 text-slate-400" />
-            Добавить источник
+            {labels.addSource}
           </button>
           <button
             type="button"
@@ -125,7 +114,7 @@ const AddSourceSplitButton = ({ onUpload, onExisting, isLoading, uploadProgress 
             className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-sm text-slate-700 transition hover:bg-slate-50"
           >
             <Link2 className="h-4 w-4 text-slate-400" />
-            Добавить существующие источники
+            {labels.addExistingSources}
           </button>
         </div>
       )}
@@ -134,7 +123,7 @@ const AddSourceSplitButton = ({ onUpload, onExisting, isLoading, uploadProgress 
 };
 
 const NotebookSidePanel = ({
-  icon: Icon,
+  icon,
   title,
   collapsed,
   onToggle,
@@ -145,6 +134,8 @@ const NotebookSidePanel = ({
   renderAction,
   children,
   footerLink,
+  expandLabel,
+  collapseLabel,
 }) => {
   return (
     <section
@@ -158,11 +149,11 @@ const NotebookSidePanel = ({
           type="button"
           onClick={onToggle}
           className="flex h-full w-full flex-col items-center justify-between bg-slate-50 py-4 text-slate-500 transition hover:bg-slate-100 hover:text-[#1f3a60]"
-          aria-label={`Развернуть панель ${title}`}
+          aria-label={expandLabel}
         >
           <ChevronRight className="h-4 w-4" />
           <div className="flex items-center gap-2" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>
-            <Icon className="h-4 w-4" />
+            {React.createElement(icon, { className: 'h-4 w-4' })}
             <span className="text-xs font-semibold tracking-[0.24em] uppercase">{title}</span>
           </div>
           <span className="h-4 w-4" />
@@ -172,7 +163,7 @@ const NotebookSidePanel = ({
           <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-4 py-4">
             <div>
               <div className="inline-flex items-center gap-2 rounded-full bg-[#1f3a60]/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#1f3a60]">
-                <Icon className="h-3.5 w-3.5" />
+                {React.createElement(icon, { className: 'h-3.5 w-3.5' })}
                 {title}
               </div>
             </div>
@@ -181,7 +172,7 @@ const NotebookSidePanel = ({
               type="button"
               onClick={onToggle}
               className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:text-slate-900"
-              aria-label={`Свернуть панель ${title}`}
+              aria-label={collapseLabel}
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
@@ -217,10 +208,10 @@ const NotebookSidePanel = ({
   );
 };
 
-const EmptyPanelState = ({ icon: Icon, title, description }) => (
+const EmptyPanelState = ({ icon, title, description }) => (
   <div className="flex h-full min-h-[280px] flex-col items-center justify-center rounded-3xl border border-dashed border-slate-200 bg-slate-50/70 px-6 text-center">
     <div className="rounded-2xl bg-white p-4 text-[#1f3a60] shadow-sm">
-      <Icon className="h-6 w-6" />
+      {React.createElement(icon, { className: 'h-6 w-6' })}
     </div>
     <p className="mt-4 text-sm font-semibold text-slate-800">{title}</p>
     <p className="mt-2 text-sm leading-6 text-slate-500">{description}</p>
@@ -228,6 +219,7 @@ const EmptyPanelState = ({ icon: Icon, title, description }) => (
 );
 
 const NotebookWorkspace = ({ notebookId }) => {
+  const { locale, t } = useLocale();
   const currentNotebookId = Number(notebookId);
   const sourceInputRef = useRef(null);
   const [sourcesCollapsed, setSourcesCollapsed] = useState(false);
@@ -268,7 +260,7 @@ const NotebookWorkspace = ({ notebookId }) => {
     } catch (error) {
       console.error('Failed to fetch notebook sources', error);
       setSources([]);
-      setSourcesError(error.response?.data?.detail || 'Не удалось загрузить источники.');
+      setSourcesError(error.response?.data?.detail || t('notebook.loadingSources'));
     } finally {
       if (!keepLoading) {
         setSourcesLoading(false);
@@ -290,7 +282,7 @@ const NotebookWorkspace = ({ notebookId }) => {
         if (!active) return;
         console.error('Failed to fetch notebook sources', error);
         setSources([]);
-        setSourcesError(error.response?.data?.detail || 'Не удалось загрузить источники.');
+        setSourcesError(error.response?.data?.detail || t('notebook.loadingSources'));
       } finally {
         if (active) {
           setSourcesLoading(false);
@@ -309,7 +301,7 @@ const NotebookWorkspace = ({ notebookId }) => {
         if (!active) return;
         console.error('Failed to fetch notebook notes', error);
         setNotes([]);
-        setNotesError(error.response?.data?.detail || 'Не удалось загрузить заметки.');
+        setNotesError(error.response?.data?.detail || t('notebook.loadingNotes'));
       } finally {
         if (active) {
           setNotesLoading(false);
@@ -323,7 +315,7 @@ const NotebookWorkspace = ({ notebookId }) => {
     return () => {
       active = false;
     };
-  }, [currentNotebookId]);
+  }, [currentNotebookId, t]);
 
   useEffect(() => {
     if (!sourceSheetOpen || sourceSheetMode !== 'existing') return undefined;
@@ -348,7 +340,7 @@ const NotebookWorkspace = ({ notebookId }) => {
         console.error('Failed to fetch existing sources', error);
         setExistingSources([]);
         setNotebooks([]);
-        setExistingSourcesError(error.response?.data?.detail || 'Не удалось загрузить существующие источники.');
+        setExistingSourcesError(error.response?.data?.detail || t('notebook.existingLoadFailed'));
       } finally {
         if (active) {
           setExistingSourcesLoading(false);
@@ -361,13 +353,9 @@ const NotebookWorkspace = ({ notebookId }) => {
     return () => {
       active = false;
     };
-  }, [sourceSheetMode, sourceSheetOpen]);
+  }, [sourceSheetMode, sourceSheetOpen, t]);
 
-  const noteCountLabel = useMemo(() => {
-    if (notes.length === 1) return '1 заметка';
-    if (notes.length > 1 && notes.length < 5) return `${notes.length} заметки`;
-    return `${notes.length} заметок`;
-  }, [notes.length]);
+  const noteCountLabel = useMemo(() => t('notebook.noteCount', { count: notes.length }), [notes.length, t]);
 
   const notebookNameById = useMemo(
     () => Object.fromEntries((notebooks || []).map((notebook) => [notebook.id, notebook.name])),
@@ -432,7 +420,7 @@ const NotebookWorkspace = ({ notebookId }) => {
     }
 
     if (errors.length > 0) {
-      setSourcesError(`Не удалось загрузить: ${errors.join(', ')}`);
+      setSourcesError(t('notebook.uploadFailed', { files: errors.join(', ') }));
     }
     setUploadingSource(false);
     setUploadProgress('');
@@ -454,7 +442,7 @@ const NotebookWorkspace = ({ notebookId }) => {
       closeSourceSheet();
     } catch (error) {
       console.error('Failed to attach existing sources', error);
-      setExistingSourcesError(error.response?.data?.detail || 'Не удалось добавить существующие источники.');
+      setExistingSourcesError(error.response?.data?.detail || t('notebook.attachFailed'));
     } finally {
       setAttachingExistingSources(false);
     }
@@ -480,7 +468,7 @@ const NotebookWorkspace = ({ notebookId }) => {
       setNotesCollapsed(false);
     } catch (error) {
       console.error('Failed to create note', error);
-      setNotesError(error.response?.data?.detail || 'Не удалось создать заметку.');
+      setNotesError(error.response?.data?.detail || t('notebook.createNoteFailed'));
     } finally {
       setSavingNote(false);
     }
@@ -494,23 +482,31 @@ const NotebookWorkspace = ({ notebookId }) => {
         <div className="flex h-full min-w-[940px] gap-4">
           <NotebookSidePanel
             icon={FileText}
-            title="Источники"
+            title={t('notebook.sources')}
             collapsed={sourcesCollapsed}
             onToggle={() => setSourcesCollapsed((prev) => !prev)}
+            expandLabel={t('notebook.expandPanel', { title: t('notebook.sources') })}
+            collapseLabel={t('notebook.collapsePanel', { title: t('notebook.sources') })}
             renderAction={() => (
               <AddSourceSplitButton
                 onUpload={handleUploadSourceClick}
                 onExisting={handleOpenExistingSources}
                 isLoading={uploadingSource}
                 uploadProgress={uploadProgress}
+                labels={{
+                  loading: t('documents.uploadLoading'),
+                  addSource: t('notebook.addSource'),
+                  addExistingSources: t('notebook.addExistingSources'),
+                  openMenu: t('notebook.openAddSourceMenu'),
+                }}
               />
             )}
-            footerLink={{ to: `/notebooks/${notebookId}/sources`, label: 'Открыть все источники' }}
+            footerLink={{ to: `/notebooks/${notebookId}/sources`, label: t('notebook.openAllSources') }}
           >
             {sourcesLoading ? (
               <div className="flex h-full items-center justify-center text-sm text-slate-500">
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Загружаем источники...
+                {t('notebook.loadingSources')}
               </div>
             ) : sourcesError ? (
               <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
@@ -519,8 +515,8 @@ const NotebookWorkspace = ({ notebookId }) => {
             ) : sources.length === 0 ? (
               <EmptyPanelState
                 icon={FilePlus2}
-                title="Источников пока нет"
-                description="Добавьте первый файл в этот блокнот, чтобы использовать его в заметках и чате."
+                title={t('notebook.noSourcesTitle')}
+                description={t('notebook.noSourcesDescription')}
               />
             ) : (
               <div className="space-y-3">
@@ -532,11 +528,11 @@ const NotebookWorkspace = ({ notebookId }) => {
                         <p className="mt-1 text-xs text-slate-400">ID #{source.id}</p>
                       </div>
                       <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
-                        {getSourceStatusLabel(source.status)}
+                        {getSourceStatusLabel(source.status, t)}
                       </span>
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-500">
-                      <span>Добавлен {formatDate(source.created_at)}</span>
+                      <span>{t('notebook.createdAt', { date: formatLocaleDate(source.created_at, locale, { day: 'numeric', month: 'short', year: 'numeric' }, '—') })}</span>
                       <span>{formatSize(source.size)}</span>
                     </div>
                   </article>
@@ -547,18 +543,20 @@ const NotebookWorkspace = ({ notebookId }) => {
 
           <NotebookSidePanel
             icon={NotebookPen}
-            title="Заметки"
+            title={t('notebook.notes')}
             collapsed={notesCollapsed}
             onToggle={() => setNotesCollapsed((prev) => !prev)}
+            expandLabel={t('notebook.expandPanel', { title: t('notebook.notes') })}
+            collapseLabel={t('notebook.collapsePanel', { title: t('notebook.notes') })}
             action={() => setNoteComposerOpen(true)}
-            actionLabel="Написать заметку"
-            footerLink={{ to: `/notebooks/${notebookId}/notes`, label: 'Открыть все заметки' }}
+            actionLabel={t('notebook.writeNote')}
+            footerLink={{ to: `/notebooks/${notebookId}/notes`, label: t('notebook.openAllNotes') }}
           >
 
             {notesLoading ? (
               <div className="flex h-full items-center justify-center text-sm text-slate-500">
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Загружаем заметки...
+                {t('notebook.loadingNotes')}
               </div>
             ) : notesError ? (
               <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
@@ -567,8 +565,8 @@ const NotebookWorkspace = ({ notebookId }) => {
             ) : notes.length === 0 ? (
               <EmptyPanelState
                 icon={MessageSquareText}
-                title="Заметок пока нет"
-                description="Создайте первую заметку, чтобы зафиксировать выводы по материалам этого блокнота."
+                title={t('notebook.noNotesTitle')}
+                description={t('notebook.noNotesDescription')}
               />
             ) : (
               <div className="space-y-3">
@@ -587,13 +585,13 @@ const NotebookWorkspace = ({ notebookId }) => {
                     <div className="flex items-start justify-between gap-3">
                       <h3 className="text-sm font-semibold text-slate-900">{note.title}</h3>
                       <span className="rounded-full bg-[#1f3a60]/10 px-2.5 py-1 text-[11px] font-semibold text-[#1f3a60]">
-                        {note.kind || 'manual'}
+                        {note.kind || t('notebook.noteKindManual')}
                       </span>
                     </div>
                     <p className="mt-2 line-clamp-4 whitespace-pre-wrap text-sm leading-6 text-slate-500">
-                      {note.body || 'Без текста'}
+                      {note.body || t('notebook.noteTextMissing')}
                     </p>
-                    <div className="mt-3 text-xs text-slate-400">Обновлено {formatDate(note.updated_at || note.created_at)}</div>
+                    <div className="mt-3 text-xs text-slate-400">{t('notebook.updatedAt', { date: formatLocaleDate(note.updated_at || note.created_at, locale, { day: 'numeric', month: 'short', year: 'numeric' }, '—') })}</div>
                   </article>
                 ))}
               </div>
@@ -612,7 +610,7 @@ const NotebookWorkspace = ({ notebookId }) => {
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
           role="dialog"
           aria-modal="true"
-          aria-label="Добавить существующие источники"
+          aria-label={t('notebook.addExistingTitle')}
         >
           {/* Backdrop */}
           <div
@@ -627,17 +625,17 @@ const NotebookWorkspace = ({ notebookId }) => {
               <div>
                 <div className="flex items-center gap-2">
                   <Link2 className="h-4 w-4 text-[#1f3a60]" />
-                  <p className="text-[15px] font-semibold text-slate-900">Добавить существующие источники</p>
+                  <p className="text-[15px] font-semibold text-slate-900">{t('notebook.addExistingTitle')}</p>
                 </div>
                 <p className="mt-1 text-sm text-slate-500">
-                  Выберите существующие источники из всех блокнотов для добавления в текущий.
+                  {t('notebook.addExistingDescription')}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={closeSourceSheet}
                 className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
-                aria-label="Закрыть"
+                aria-label={t('notebook.close')}
               >
                 <X className="h-4 w-4" />
               </button>
@@ -659,7 +657,7 @@ const NotebookWorkspace = ({ notebookId }) => {
                       <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                       <input
                         type="text"
-                        placeholder="Поиск источников по названию или URL..."
+                        placeholder={t('notebook.sourceSearchPlaceholder')}
                         value={sourceSearch}
                         onChange={(e) => setSourceSearch(e.target.value)}
                         className="h-10 w-full rounded-lg border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-800 placeholder-slate-400 transition focus:border-[#1f3a60] focus:outline-none focus:ring-2 focus:ring-[#1f3a60]/20"
@@ -678,7 +676,7 @@ const NotebookWorkspace = ({ notebookId }) => {
                         }}
                         className="h-10 shrink-0 px-3"
                       >
-                        {areAllSelected ? 'Сбросить все' : 'Выбрать все'}
+                        {areAllSelected ? t('notebook.resetAll') : t('notebook.selectAll')}
                       </Button>
                     )}
                   </div>
@@ -691,7 +689,7 @@ const NotebookWorkspace = ({ notebookId }) => {
               {existingSourcesLoading ? (
                 <div className="flex h-48 items-center justify-center text-sm text-slate-500">
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Загружаем доступные источники...
+                  {t('notebook.loadingAvailableSources')}
                 </div>
               ) : existingSourcesError ? (
                 <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
@@ -706,7 +704,7 @@ const NotebookWorkspace = ({ notebookId }) => {
                   return (
                     <div className="flex h-48 flex-col items-center justify-center gap-2 text-sm text-slate-500">
                       <FileText className="h-8 w-8 text-slate-300" />
-                      {attachableSources.length === 0 ? 'Блокноты не найдены.' : 'Ничего не найдено.'}
+                      {attachableSources.length === 0 ? t('notebook.notebooksNotFound') : t('notebook.nothingFound')}
                     </div>
                   );
                 }
@@ -733,11 +731,11 @@ const NotebookWorkspace = ({ notebookId }) => {
                           <div className="min-w-0 flex-1">
                             <p className="truncate text-sm font-semibold text-slate-900">{source.name}</p>
                             <p className="mt-0.5 text-xs text-slate-400">
-                              {getNotebookLabel(source, notebookNameById)} · {formatSize(source.size)}
+                              {getNotebookLabel(source, notebookNameById, t)} · {formatSize(source.size)}
                             </p>
                           </div>
                           <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
-                            {getSourceStatusLabel(source.status)}
+                            {getSourceStatusLabel(source.status, t)}
                           </span>
                         </label>
                       );
@@ -750,7 +748,7 @@ const NotebookWorkspace = ({ notebookId }) => {
             {/* Footer */}
             <div className="flex items-center justify-end gap-3 border-t border-slate-200 px-6 py-4">
               <Button type="button" variant="ghost" onClick={closeSourceSheet}>
-                Отмена
+                {t('notebook.cancel')}
               </Button>
               <Button
                 type="button"
@@ -762,7 +760,7 @@ const NotebookWorkspace = ({ notebookId }) => {
                   attachableSources.length === 0
                 }
               >
-                Добавить выбранное
+                {t('notebook.addSelected')}
               </Button>
             </div>
           </div>
@@ -775,7 +773,7 @@ const NotebookWorkspace = ({ notebookId }) => {
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
           role="dialog"
           aria-modal="true"
-          aria-label="Просмотр заметки"
+          aria-label={t('notebook.viewNote')}
         >
           {/* Backdrop */}
           <div
@@ -793,9 +791,9 @@ const NotebookWorkspace = ({ notebookId }) => {
                   <p className="truncate text-[15px] font-semibold text-slate-900">{selectedNote.title}</p>
                 </div>
                 <p className="mt-1 text-xs text-slate-400">
-                  Создано {formatDate(selectedNote.created_at)}
+                  {t('notebook.noteCreatedAt', { date: formatLocaleDate(selectedNote.created_at, locale, { day: 'numeric', month: 'short', year: 'numeric' }, '—') })}
                   {selectedNote.updated_at && selectedNote.updated_at !== selectedNote.created_at
-                    ? ` · Изменено ${formatDate(selectedNote.updated_at)}`
+                    ? ` · ${t('notebook.noteUpdatedAt', { date: formatLocaleDate(selectedNote.updated_at, locale, { day: 'numeric', month: 'short', year: 'numeric' }, '—') })}`
                     : ''}
                 </p>
               </div>
@@ -803,7 +801,7 @@ const NotebookWorkspace = ({ notebookId }) => {
                 type="button"
                 onClick={() => setSelectedNote(null)}
                 className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
-                aria-label="Закрыть"
+                aria-label={t('notebook.close')}
               >
                 <X className="h-4 w-4" />
               </button>
@@ -814,17 +812,17 @@ const NotebookWorkspace = ({ notebookId }) => {
               {selectedNote.body ? (
                 <p className="whitespace-pre-wrap text-sm leading-7 text-slate-700">{selectedNote.body}</p>
               ) : (
-                <p className="text-sm italic text-slate-400">Текст заметки отсутствует.</p>
+                <p className="text-sm italic text-slate-400">{t('notebook.noteBodyMissing')}</p>
               )}
             </div>
 
             {/* Footer */}
             <div className="flex items-center justify-between border-t border-slate-200 px-6 py-4">
               <span className="rounded-full bg-[#1f3a60]/10 px-3 py-1 text-[11px] font-semibold text-[#1f3a60]">
-                {selectedNote.kind || 'manual'}
+                {selectedNote.kind || t('notebook.noteKindManual')}
               </span>
               <Button type="button" variant="ghost" onClick={() => setSelectedNote(null)}>
-                Закрыть
+                {t('notebook.close')}
               </Button>
             </div>
           </div>
@@ -837,7 +835,7 @@ const NotebookWorkspace = ({ notebookId }) => {
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
           role="dialog"
           aria-modal="true"
-          aria-label="Написать заметку"
+          aria-label={t('notebook.writeNoteTitle')}
         >
           {/* Backdrop */}
           <div
@@ -852,17 +850,17 @@ const NotebookWorkspace = ({ notebookId }) => {
               <div>
                 <div className="flex items-center gap-2">
                   <NotebookPen className="h-4 w-4 text-[#1f3a60]" />
-                  <p className="text-[15px] font-semibold text-slate-900">Написать заметку</p>
+                  <p className="text-[15px] font-semibold text-slate-900">{t('notebook.writeNoteTitle')}</p>
                 </div>
                 <p className="mt-1 text-sm text-slate-500">
-                  Зафиксируйте наблюдения, выводы или следующие шаги.
+                  {t('notebook.writeNoteDescription')}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => { setNoteComposerOpen(false); setNoteTitle(''); setNoteBody(''); }}
                 className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
-                aria-label="Закрыть"
+                aria-label={t('notebook.close')}
               >
                 <X className="h-4 w-4" />
               </button>
@@ -874,14 +872,14 @@ const NotebookWorkspace = ({ notebookId }) => {
                 type="text"
                 value={noteTitle}
                 onChange={(e) => setNoteTitle(e.target.value)}
-                placeholder="Заголовок заметки"
+                placeholder={t('notebook.noteTitlePlaceholder')}
                 className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-800 placeholder-slate-400 transition focus:border-[#1f3a60] focus:outline-none focus:ring-2 focus:ring-[#1f3a60]/20"
                 autoFocus
               />
               <textarea
                 value={noteBody}
                 onChange={(e) => setNoteBody(e.target.value)}
-                placeholder="Кратко зафиксируйте наблюдения, выводы или следующие шаги..."
+                placeholder={t('notebook.noteBodyPlaceholder')}
                 rows={6}
                 className="w-full resize-none rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder-slate-400 transition focus:border-[#1f3a60] focus:outline-none focus:ring-2 focus:ring-[#1f3a60]/20"
               />
@@ -896,10 +894,10 @@ const NotebookWorkspace = ({ notebookId }) => {
                   variant="ghost"
                   onClick={() => { setNoteComposerOpen(false); setNoteTitle(''); setNoteBody(''); }}
                 >
-                  Отмена
+                  {t('notebook.cancel')}
                 </Button>
                 <Button type="submit" isLoading={savingNote} disabled={!noteTitle.trim()}>
-                  Сохранить
+                  {t('notebook.save')}
                 </Button>
               </div>
             </form>

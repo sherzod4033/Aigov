@@ -17,45 +17,39 @@ import {
 import { Button } from '../ui/Button';
 import { cn } from '../../lib/utils';
 import { NotebookHeaderContext } from './NotebookHeaderContext';
+import LocaleSwitcher from '../i18n/LocaleSwitcher';
+import { useLocale } from '../../i18n';
 
-const NAV_ITEMS = [
-    { name: 'Все источники', href: '/sources', icon: FileText },
-    { name: 'Блокноты', href: '/notebooks', icon: Bookmark },
-    { name: 'Чат', href: '/chat', icon: MessageSquare },
-    { name: 'Логи', href: '/admin/logs', icon: ChartNoAxesCombined },
-    { name: 'Настройки', href: '/settings', icon: Settings },
-];
-
-const resolvePageMeta = (pathname) => {
+const resolvePageMeta = (pathname, t) => {
     if (pathname === '/' || pathname.startsWith('/chat')) {
-        return { title: 'KnowledgeAI', badge: 'AI over sources', searchPlaceholder: 'Введите ваш вопрос...' };
+        return { title: t('layout.pageMeta.homeTitle'), badge: t('layout.pageMeta.homeBadge'), searchPlaceholder: t('layout.pageMeta.homeSearch') };
     }
     if (pathname.startsWith('/ask')) {
-        return { title: 'Ask', badge: 'One-shot analysis', searchPlaceholder: 'Поиск Ask запросов...' };
+        return { title: t('layout.pageMeta.askTitle'), badge: t('layout.pageMeta.askBadge'), searchPlaceholder: t('layout.pageMeta.askSearch') };
     }
     if (pathname.startsWith('/notes')) {
-        return { title: 'Notes', badge: 'Knowledge capture', searchPlaceholder: 'Поиск notes...' };
+        return { title: t('layout.pageMeta.notesTitle'), badge: t('layout.pageMeta.notesBadge'), searchPlaceholder: t('layout.pageMeta.notesSearch') };
     }
     if (pathname.startsWith('/insights')) {
-        return { title: 'Insights', badge: 'Structured findings', searchPlaceholder: 'Поиск insights...' };
+        return { title: t('layout.pageMeta.insightsTitle'), badge: t('layout.pageMeta.insightsBadge'), searchPlaceholder: t('layout.pageMeta.insightsSearch') };
     }
     if (/^\/notebooks\/[^/]+(\/|$)/.test(pathname)) {
-        return { title: 'Блокнот', badge: 'Контекст', searchPlaceholder: 'Поиск внутри блокнота...' };
+        return { title: t('layout.pageMeta.notebookTitle'), badge: t('layout.pageMeta.notebookBadge'), searchPlaceholder: t('layout.pageMeta.notebookSearch') };
     }
     if (pathname.startsWith('/notebooks')) {
-        return { title: 'Блокноты', badge: 'Контекст', searchPlaceholder: 'Поиск notebooks...' };
+        return { title: t('layout.pageMeta.notebooksTitle'), badge: t('layout.pageMeta.notebooksBadge'), searchPlaceholder: t('layout.pageMeta.notebooksSearch') };
     }
     if (pathname.startsWith('/sources') || pathname.startsWith('/admin/sources') || pathname.startsWith('/admin/documents')) {
-        return { title: 'Все источники', badge: 'Центр источников', searchPlaceholder: 'Поиск sources...' };
+        return { title: t('layout.pageMeta.sourcesTitle'), badge: t('layout.pageMeta.sourcesBadge'), searchPlaceholder: t('layout.pageMeta.sourcesSearch') };
     }
     if (pathname.startsWith('/admin/logs')) {
-        return { title: 'Логи и Аналитика', badge: 'Мониторинг', searchPlaceholder: 'Поиск по ID запроса...' };
+        return { title: t('layout.pageMeta.logsTitle'), badge: t('layout.pageMeta.logsBadge'), searchPlaceholder: t('layout.pageMeta.logsSearch') };
     }
     if (pathname.startsWith('/settings')) {
-        return { title: 'Настройки', badge: 'Система', searchPlaceholder: 'Поиск пользователей...' };
+        return { title: t('layout.pageMeta.settingsTitle'), badge: t('layout.pageMeta.settingsBadge'), searchPlaceholder: t('layout.pageMeta.settingsSearch') };
     }
 
-    return { title: 'KnowledgeAI', badge: 'Workspace', searchPlaceholder: 'Поиск...' };
+    return { title: t('layout.pageMeta.homeTitle'), badge: t('layout.pageMeta.fallbackBadge'), searchPlaceholder: t('layout.pageMeta.fallbackSearch') };
 };
 
 const isActiveLink = (pathname, href) => pathname === href || (href !== '/' && pathname.startsWith(`${href}/`));
@@ -79,31 +73,30 @@ const Layout = () => {
     const location = useLocation();
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
+    const { t } = useLocale();
+    const navItems = useMemo(() => ([
+        { name: t('layout.nav.sources'), href: '/sources', icon: FileText },
+        { name: t('layout.nav.notebooks'), href: '/notebooks', icon: Bookmark },
+        { name: t('layout.nav.chat'), href: '/chat', icon: MessageSquare },
+        { name: t('layout.nav.logs'), href: '/admin/logs', icon: ChartNoAxesCombined },
+        { name: t('layout.nav.settings'), href: '/settings', icon: Settings },
+    ]), [t]);
 
-    // --- User Info из JWT ---
     const userInfo = useMemo(() => {
         const token = localStorage.getItem('token');
-        if (!token) return { username: 'Пользователь', email: '' };
+        if (!token) return { username: t('layout.user.defaultName'), email: '' };
         const payload = decodeJwtPayload(token);
-        const username = payload?.sub || 'Пользователь';
+        const username = payload?.sub || t('layout.user.defaultName');
         return {
             username,
             email: `${username}@knowledge.local`,
         };
-    }, []);
+    }, [t]);
 
-    // --- Язык: читаем из localStorage, по умолчанию TJ ---
-    const [activeLang, setActiveLang] = useState(() => localStorage.getItem('lang') || 'TJ');
     const [notebookHeader, setNotebookHeader] = useState(null);
     const [notebookActions, setNotebookActions] = useState(null);
     const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('knowledgeai.sidebarCollapsed') === 'true');
 
-    const handleLangSwitch = (lang) => {
-        setActiveLang(lang);
-        localStorage.setItem('lang', lang);
-    };
-
-    // --- Поиск через URL searchParams ---
     const searchValue = searchParams.get('q') || '';
 
     const handleSearchChange = (e) => {
@@ -115,13 +108,12 @@ const Layout = () => {
         }
     };
 
-    // Сбрасываем поиск при смене страницы
     useEffect(() => {
         setSearchParams({});
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [location.pathname]);
 
-    const pageMeta = resolvePageMeta(location.pathname);
+    const pageMeta = resolvePageMeta(location.pathname, t);
     const notebookDetailRoute = isNotebookDetailRoute(location.pathname);
 
     const handleLogout = () => {
@@ -161,15 +153,15 @@ const Layout = () => {
                             'flex w-full items-center rounded-lg border border-white/15 text-sm font-semibold text-slate-200 transition hover:bg-white/10 hover:text-white',
                             sidebarCollapsed ? 'justify-center px-0 py-2.5' : 'justify-between px-3 py-2.5'
                         )}
-                        aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+                        aria-label={sidebarCollapsed ? t('layout.actions.expandSidebar') : t('layout.actions.collapseSidebar')}
                     >
-                        {!sidebarCollapsed ? <span>Скрыть меню</span> : null}
+                        {!sidebarCollapsed ? <span>{t('layout.actions.hideMenu')}</span> : null}
                         {sidebarCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
                     </button>
                 </div>
 
                 <nav className={cn('flex-1 space-y-1 py-5', sidebarCollapsed ? 'px-2' : 'px-3')}>
-                    {NAV_ITEMS.map((item) => {
+                    {navItems.map((item) => {
                         const Icon = item.icon;
                         const active = isActiveLink(location.pathname, item.href);
 
@@ -210,10 +202,10 @@ const Layout = () => {
                             'flex w-full items-center justify-center rounded-lg border border-white/20 text-sm font-semibold text-white transition hover:bg-white/10',
                             sidebarCollapsed ? 'px-0 py-2.5' : 'gap-2 px-3 py-2'
                         )}
-                        title={sidebarCollapsed ? 'Выйти' : undefined}
+                        title={sidebarCollapsed ? t('layout.actions.logout') : undefined}
                     >
                         <LogOut className="h-4 w-4" />
-                        {!sidebarCollapsed ? 'Выйти' : null}
+                        {!sidebarCollapsed ? t('layout.actions.logout') : null}
                     </button>
                 </div>
             </aside>
@@ -236,7 +228,7 @@ const Layout = () => {
                                 <div className="flex min-w-0 flex-col gap-1">
                                     <div className="flex min-w-0 items-center gap-2">
                                         <span className="rounded-full bg-[#1f3a60]/10 px-2.5 py-0.5 text-[10px] font-bold text-[#1f3a60]">
-                                            Блокнот #{notebookHeader.id}
+                                            {t('layout.actions.notebookPrefix')} #{notebookHeader.id}
                                         </span>
                                         <h1 className="truncate text-lg lg:text-2xl font-extrabold text-[#1f3a60]">
                                             {notebookHeader.name}
@@ -248,15 +240,15 @@ const Layout = () => {
                                     <div className="flex flex-wrap items-center gap-3 text-[11px] font-medium text-slate-400">
                                         <div className="inline-flex items-center gap-1.5">
                                             <CalendarDays className="h-3.5 w-3.5" />
-                                            <span>Создан: {notebookHeader.createdAtText}</span>
+                                            <span>{t('layout.actions.created')}: {notebookHeader.createdAtText}</span>
                                         </div>
                                         <div className="inline-flex items-center gap-1.5">
                                             <Clock3 className="h-3.5 w-3.5" />
-                                            <span>Обновлен: {notebookHeader.updatedAtText}</span>
+                                            <span>{t('layout.actions.updated')}: {notebookHeader.updatedAtText}</span>
                                         </div>
                                         <div className="inline-flex items-center gap-1.5">
                                             <Bookmark className="h-3.5 w-3.5" />
-                                            <span>Профиль: {notebookHeader.domainProfile}</span>
+                                            <span>{t('layout.actions.profile')}: {notebookHeader.domainProfile}</span>
                                         </div>
                                     </div>
                                 </div>
@@ -266,23 +258,7 @@ const Layout = () => {
                         <div className="flex w-full items-center gap-3 sm:w-auto">
                             {!notebookDetailRoute ? (
                                 <>
-                                    <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 mr-2">
-                                        {['TJ', 'RU'].map((lang) => (
-                                            <button
-                                                key={lang}
-                                                type="button"
-                                                onClick={() => handleLangSwitch(lang)}
-                                                className={cn(
-                                                    'rounded-md px-2 py-0.5 text-[10px] font-bold transition',
-                                                    activeLang === lang
-                                                        ? 'bg-white text-[#1f3a60] shadow-sm'
-                                                        : 'text-slate-500 hover:text-slate-700',
-                                                )}
-                                            >
-                                                {lang}
-                                            </button>
-                                        ))}
-                                    </div>
+                                    <LocaleSwitcher className="mr-2" buttonClassName="px-2 py-0.5 text-[10px] font-bold" />
 
                                     <div className="relative flex-1 sm:w-64 sm:flex-none">
                                         <input
@@ -296,7 +272,7 @@ const Layout = () => {
 
                                 <div className="hidden items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500 xl:flex">
                                     <span className="mr-2 inline-block h-2 w-2 rounded-full bg-green-500"></span>
-                                    Система работает
+                                    {t('layout.actions.systemOk')}
                                 </div>
                                 </>
                             ) : notebookActions ? (
@@ -309,7 +285,7 @@ const Layout = () => {
                                         title={notebookActions.archiveTitle}
                                         onClick={notebookActions.onArchive}
                                     >
-                                        Архивировать
+                                        {t('layout.actions.archive')}
                                     </Button>
                                     <Button
                                         type="button"
@@ -320,7 +296,7 @@ const Layout = () => {
                                         onClick={notebookActions.onDelete}
                                     >
                                         <Trash2 className="h-4 w-4" />
-                                        Удалить
+                                        {t('layout.actions.delete')}
                                     </Button>
                                 </div>
                             ) : null}
@@ -329,7 +305,7 @@ const Layout = () => {
                                 type="button"
                                 onClick={handleLogout}
                                 className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50 hover:text-red-600 lg:hidden"
-                                aria-label="Logout"
+                                aria-label={t('layout.actions.logoutMobile')}
                             >
                                 <LogOut className="h-4 w-4" />
                             </button>
@@ -337,7 +313,7 @@ const Layout = () => {
                     </div>
 
                     <div className="mt-3 flex flex-wrap gap-2 lg:hidden">
-                        {NAV_ITEMS.map((item) => (
+                        {navItems.map((item) => (
                             <Link
                                 key={item.name}
                                 to={item.href}

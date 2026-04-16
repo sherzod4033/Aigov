@@ -6,9 +6,12 @@ import api from '../services/api';
 import { Button } from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import { Card, CardContent, CardFooter, CardHeader } from '../components/ui/Card';
+import LocaleSwitcher from '../components/i18n/LocaleSwitcher';
+import { useLocale } from '../i18n';
 
 const RegisterPage = () => {
     const navigate = useNavigate();
+    const { t } = useLocale();
     const {
         register,
         handleSubmit,
@@ -31,7 +34,7 @@ const RegisterPage = () => {
             navigate('/login');
         } catch (err) {
             console.error(err);
-            setError(err.response?.data?.detail || 'Регистрация не удалась');
+            setError(err.response?.data?.detail || t('auth.register.failed'));
         } finally {
             setIsLoading(false);
         }
@@ -43,10 +46,7 @@ const RegisterPage = () => {
 
             <div className="relative mx-auto flex min-h-[calc(100vh-3rem)] max-w-6xl flex-col">
                 <header className="flex justify-end">
-                    <div className="inline-flex items-center gap-1 rounded-lg border border-white/20 bg-white/10 p-1 text-xs font-semibold">
-                        <button type="button" className="rounded-md bg-white px-3 py-1 text-[#1f3a60]">TJ</button>
-                        <button type="button" className="rounded-md px-3 py-1 text-white/80">RU</button>
-                    </div>
+                    <LocaleSwitcher className="border-white/20 bg-white/10" buttonClassName="text-white data-[active=true]:text-[#1f3a60]" />
                 </header>
 
                 <main className="flex flex-1 items-center justify-center py-8">
@@ -60,7 +60,7 @@ const RegisterPage = () => {
                                 </div>
                                 <div className="text-left">
                                     <p className="text-4xl font-extrabold leading-none text-[#1f3a60]">Knowledge<span className="text-[#c5a059]">AI</span></p>
-                                    <p className="mt-1 text-sm font-semibold text-slate-500">Создание нового аккаунта</p>
+                                    <p className="mt-1 text-sm font-semibold text-slate-500">{t('auth.register.subtitle')}</p>
                                 </div>
                             </div>
                         </CardHeader>
@@ -69,15 +69,15 @@ const RegisterPage = () => {
                             <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
                                 <div>
                                     <label htmlFor="username" className="mb-1 block text-sm font-semibold text-[#1f3a60]">
-                                        Имя пользователя
+                                        {t('auth.register.username')}
                                     </label>
                                     <div className="relative">
                                         <UserPlus className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                                         <Input
                                             id="username"
                                             className="h-11 pl-9"
-                                            placeholder="username"
-                                            {...register('username', { required: 'Введите имя пользователя' })}
+                                            placeholder={t('auth.register.usernamePlaceholder')}
+                                            {...register('username', { required: t('auth.register.usernameRequired') })}
                                         />
                                     </div>
                                     {errors.username && <p className="mt-1 text-xs font-medium text-red-600">{errors.username.message}</p>}
@@ -85,7 +85,7 @@ const RegisterPage = () => {
 
                                 <div>
                                     <label htmlFor="password" className="mb-1 block text-sm font-semibold text-[#1f3a60]">
-                                        Пароль
+                                        {t('auth.register.password')}
                                     </label>
                                     <div className="relative">
                                         <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -93,12 +93,12 @@ const RegisterPage = () => {
                                             id="password"
                                             type={showPassword ? 'text' : 'password'}
                                             className="h-11 pl-9 pr-10"
-                                            placeholder="Ақаллан 6 рамз"
+                                            placeholder={t('auth.register.passwordPlaceholder')}
                                             {...register('password', {
-                                                required: 'Введите пароль',
+                                                required: t('auth.register.passwordRequired'),
                                                 minLength: {
                                                     value: 6,
-                                                    message: 'Пароль должен содержать минимум 6 символов',
+                                                    message: t('auth.register.passwordMinLength'),
                                                 },
                                             })}
                                         />
@@ -106,7 +106,7 @@ const RegisterPage = () => {
                                             type="button"
                                             onClick={() => setShowPassword((prev) => !prev)}
                                             className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                                            aria-label={showPassword ? 'Скрыть пароль' : 'Показать пароль'}
+                                            aria-label={showPassword ? t('auth.register.hidePassword') : t('auth.register.showPassword')}
                                         >
                                             {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                                         </button>
@@ -121,16 +121,16 @@ const RegisterPage = () => {
                                 )}
 
                                 <Button type="submit" className="h-11 w-full text-[13px] tracking-[0.08em]" isLoading={isLoading}>
-                                    ЗАРЕГИСТРИРОВАТЬСЯ
+                                    {t('auth.register.submit')}
                                 </Button>
                             </form>
                         </CardContent>
 
                         <CardFooter className="justify-center border-t border-slate-100 pb-7 pt-5 text-sm text-slate-500">
                             <span>
-                                Уже есть аккаунт?{' '}
+                                {t('auth.register.haveAccount')}{' '}
                                 <Link to="/login" className="font-semibold text-[#1f3a60] hover:text-[#162945]">
-                                    Войти
+                                    {t('auth.register.login')}
                                 </Link>
                             </span>
                         </CardFooter>
@@ -138,7 +138,7 @@ const RegisterPage = () => {
                 </main>
 
                 <footer className="pb-2 text-center text-xs font-medium text-white/55">
-                    KnowledgeAI Systems v1.0.4
+                    {t('auth.register.footer')}
                 </footer>
             </div>
         </div>

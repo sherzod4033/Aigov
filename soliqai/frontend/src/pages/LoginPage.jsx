@@ -6,9 +6,12 @@ import api from '../services/api';
 import { Button } from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import { Card, CardContent, CardFooter, CardHeader } from '../components/ui/Card';
+import LocaleSwitcher from '../components/i18n/LocaleSwitcher';
+import { useLocale } from '../i18n';
 
 const LoginPage = () => {
     const navigate = useNavigate();
+    const { t } = useLocale();
     const {
         register,
         handleSubmit,
@@ -36,7 +39,7 @@ const LoginPage = () => {
             navigate('/');
         } catch (err) {
             console.error(err);
-            setError('Неверное имя пользователя или пароль');
+            setError(t('auth.login.invalidCredentials'));
         } finally {
             setIsLoading(false);
         }
@@ -48,10 +51,7 @@ const LoginPage = () => {
 
             <div className="relative mx-auto flex min-h-[calc(100vh-3rem)] max-w-6xl flex-col">
                 <header className="flex justify-end">
-                    <div className="inline-flex items-center gap-1 rounded-lg border border-white/20 bg-white/10 p-1 text-xs font-semibold">
-                        <button type="button" className="rounded-md bg-white px-3 py-1 text-[#1f3a60]">TJ</button>
-                        <button type="button" className="rounded-md px-3 py-1 text-white/80">RU</button>
-                    </div>
+                    <LocaleSwitcher className="border-white/20 bg-white/10" buttonClassName="text-white data-[active=true]:text-[#1f3a60]" />
                 </header>
 
                 <main className="flex flex-1 items-center justify-center py-8">
@@ -73,15 +73,15 @@ const LoginPage = () => {
                             <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
                                 <div>
                                     <label htmlFor="username" className="mb-1 block text-sm font-semibold text-[#1f3a60]">
-                                        Имя пользователя
+                                        {t('auth.login.username')}
                                     </label>
                                     <div className="relative">
                                         <User className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                                         <Input
                                             id="username"
                                             className="h-11 pl-9"
-                                            placeholder="user@knowledge.local"
-                                            {...register('username', { required: 'Введите имя пользователя' })}
+                                            placeholder={t('auth.login.usernamePlaceholder')}
+                                            {...register('username', { required: t('auth.login.usernameRequired') })}
                                         />
                                     </div>
                                     {errors.username && <p className="mt-1 text-xs font-medium text-red-600">{errors.username.message}</p>}
@@ -89,7 +89,7 @@ const LoginPage = () => {
 
                                 <div>
                                     <label htmlFor="password" className="mb-1 block text-sm font-semibold text-[#1f3a60]">
-                                        Пароль
+                                        {t('auth.login.password')}
                                     </label>
                                     <div className="relative">
                                         <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -98,13 +98,13 @@ const LoginPage = () => {
                                             type={showPassword ? 'text' : 'password'}
                                             className="h-11 pl-9 pr-10"
                                             placeholder="••••••••"
-                                            {...register('password', { required: 'Введите пароль' })}
+                                            {...register('password', { required: t('auth.login.passwordRequired') })}
                                         />
                                         <button
                                             type="button"
                                             onClick={() => setShowPassword((prev) => !prev)}
                                             className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                                            aria-label={showPassword ? 'Скрыть пароль' : 'Показать пароль'}
+                                            aria-label={showPassword ? t('auth.login.hidePassword') : t('auth.login.showPassword')}
                                         >
                                             {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                                         </button>
@@ -115,10 +115,10 @@ const LoginPage = () => {
                                 <div className="flex items-center justify-between text-sm">
                                     <label className="inline-flex items-center gap-2 text-slate-600">
                                         <input type="checkbox" className="h-4 w-4 rounded border-slate-300 text-[#1f3a60] focus:ring-[#1f3a60]/30" />
-                                        Дар хотир нигоҳ дор
+                                        {t('auth.login.rememberMe')}
                                     </label>
                                     <button type="button" className="font-semibold text-[#1f3a60] hover:text-[#162945]">
-                                        Забыли пароль?
+                                        {t('auth.login.forgotPassword')}
                                     </button>
                                 </div>
 
@@ -129,16 +129,16 @@ const LoginPage = () => {
                                 )}
 
                                 <Button type="submit" className="h-11 w-full text-[13px] tracking-[0.08em]" isLoading={isLoading}>
-                                    ВОЙТИ
+                                    {t('auth.login.submit')}
                                 </Button>
                             </form>
                         </CardContent>
 
                         <CardFooter className="justify-center border-t border-slate-100 pb-7 pt-5 text-sm text-slate-500">
                             <span>
-                                Нужна помощь?{' '}
+                                {t('auth.login.help')}{' '}
                                 <Link to="/register" className="font-semibold text-[#1f3a60] hover:text-[#162945]">
-                                    Техническая поддержка
+                                    {t('auth.login.support')}
                                 </Link>
                             </span>
                         </CardFooter>
@@ -146,7 +146,7 @@ const LoginPage = () => {
                 </main>
 
                 <footer className="pb-2 text-center text-xs font-medium text-white/55">
-                    © 2026 Правительство Республики Таджикистан. Все права защищены.
+                    {t('auth.login.footer')}
                 </footer>
             </div>
         </div>

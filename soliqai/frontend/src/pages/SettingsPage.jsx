@@ -1,6 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { settingsService } from '../services/settingsService';
 import { Button } from '../components/ui/Button';
+import { useLocale } from '../i18n';
+import { formatLocaleDate } from '../lib/locale';
 
 const ROLE_OPTIONS = ['admin', 'content_manager', 'user'];
 
@@ -13,6 +15,7 @@ const normalizeSelectedModel = (currentValue, availableModels) => {
 };
 
 const SettingsPage = () => {
+    const { locale, t } = useLocale();
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
     const [runtimeSettings, setRuntimeSettings] = useState({
@@ -30,7 +33,7 @@ const SettingsPage = () => {
     const [error, setError] = useState('');
     const canSave = Boolean(runtimeSettings.chat_model && runtimeSettings.embedding_model);
 
-    const loadData = async () => {
+    const loadData = useCallback(async () => {
         setIsLoading(true);
         setError('');
 
@@ -54,15 +57,15 @@ const SettingsPage = () => {
             setUsers(usersRes.data || []);
         } catch (err) {
             console.error('Failed to load settings', err);
-            setError(err.response?.data?.detail || 'Не удалось загрузить настройки');
+            setError(err.response?.data?.detail || t('settings.loadFailed'));
         } finally {
             setIsLoading(false);
         }
-    };
+    }, [t]);
 
     useEffect(() => {
         loadData();
-    }, []);
+    }, [loadData]);
 
     const handleSave = async () => {
         setIsSaving(true);
@@ -88,10 +91,10 @@ const SettingsPage = () => {
                     settingsData.available_embedding_models || []
                 ),
             });
-            setMessage('Настройки сохранены');
+            setMessage(t('settings.saved'));
         } catch (err) {
             console.error('Failed to update settings', err);
-            setError(err.response?.data?.detail || 'Не удалось сохранить настройки');
+            setError(err.response?.data?.detail || t('settings.saveFailed'));
         } finally {
             setIsSaving(false);
         }
@@ -105,14 +108,14 @@ const SettingsPage = () => {
             )));
         } catch (err) {
             console.error('Failed to update role', err);
-            alert(err.response?.data?.detail || 'Не удалось обновить роль');
+            alert(err.response?.data?.detail || t('settings.roleUpdateFailed'));
         }
     };
 
     if (isLoading) {
         return (
-            <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-slate-500 shadow-sm">
-                Загрузка настроек...
+                <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-slate-500 shadow-sm">
+                {t('settings.loading')}
             </div>
         );
     }
@@ -121,13 +124,13 @@ const SettingsPage = () => {
         <div className="space-y-6 px-4">
             <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                 <div className="mb-4 flex items-center gap-3">
-                    <h2 className="text-3xl font-extrabold text-[#1f3a60]">Настройки выполнения</h2>
-                    <span className="rounded-full bg-[#1f3a60]/10 px-3 py-1 text-xs font-bold text-[#1f3a60]">Конфигурация ИИ</span>
+                    <h2 className="text-3xl font-extrabold text-[#1f3a60]">{t('settings.runtimeTitle')}</h2>
+                    <span className="rounded-full bg-[#1f3a60]/10 px-3 py-1 text-xs font-bold text-[#1f3a60]">{t('settings.runtimeBadge')}</span>
                 </div>
 
                 <div className="grid gap-4 md:grid-cols-2">
                     <div>
-                        <label className="mb-2 block text-sm font-semibold text-slate-700">Chat model</label>
+                        <label className="mb-2 block text-sm font-semibold text-slate-700">{t('settings.chatModel')}</label>
                         <select
                             value={runtimeSettings.chat_model}
                             onChange={(event) => setRuntimeSettings((prev) => ({
@@ -142,13 +145,13 @@ const SettingsPage = () => {
                                     <option key={model} value={model}>{model}</option>
                                 ))
                             ) : (
-                                <option value="">Нет доступных chat-моделей</option>
+                                <option value="">{t('settings.noChatModels')}</option>
                             )}
                         </select>
                     </div>
 
                     <div>
-                        <label className="mb-2 block text-sm font-semibold text-slate-700">Embedding model</label>
+                        <label className="mb-2 block text-sm font-semibold text-slate-700">{t('settings.embeddingModel')}</label>
                         <select
                             value={runtimeSettings.embedding_model}
                             onChange={(event) => setRuntimeSettings((prev) => ({
@@ -163,18 +166,18 @@ const SettingsPage = () => {
                                     <option key={model} value={model}>{model}</option>
                                 ))
                             ) : (
-                                <option value="">Нет доступных embedding-моделей</option>
+                                <option value="">{t('settings.noEmbeddingModels')}</option>
                             )}
                         </select>
                         <p className="mt-2 text-xs text-slate-500">
-                            Список подгружается из Ollama. Выбор доступен только из найденных моделей.
+                            {t('settings.embeddingHint')}
                         </p>
                         <p className="mt-1 text-xs text-slate-500">
-                            После смены embedding model нужно переиндексировать документы.
+                            {t('settings.embeddingReindexHint')}
                         </p>
                         {!runtimeSettings.ollama_available && (
                             <p className="mt-2 text-xs font-semibold text-amber-600">
-                                Не удалось получить список моделей из Ollama: {runtimeSettings.ollama_error || 'сервис недоступен'}.
+                                {t('settings.ollamaFailed', { error: runtimeSettings.ollama_error || t('settings.ollamaFallback') })}
                             </p>
                         )}
                     </div>
@@ -192,9 +195,9 @@ const SettingsPage = () => {
                             className="mt-1 h-4 w-4 rounded border-slate-300 text-[#1f3a60] focus:ring-[#1f3a60]/25"
                         />
                         <span>
-                            <span className="block text-sm font-semibold text-slate-800">Condense query</span>
+                            <span className="block text-sm font-semibold text-slate-800">{t('settings.condenseQuery')}</span>
                             <span className="mt-1 block text-xs text-slate-500">
-                                Если включено, система сначала переформулирует вопрос в самостоятельный поисковый запрос. Отключение может ускорить ответы, но хуже обрабатывает короткие follow-up вопросы из истории чата.
+                                {t('settings.condenseHint')}
                             </span>
                         </span>
                     </label>
@@ -202,7 +205,7 @@ const SettingsPage = () => {
 
                 <div className="mt-5 flex flex-wrap items-center gap-3">
                     <Button type="button" onClick={handleSave} isLoading={isSaving} disabled={!canSave}>
-                        Сохранить настройки
+                        {t('settings.save')}
                     </Button>
                     {message && <span className="text-sm font-semibold text-emerald-600">{message}</span>}
                     {error && <span className="text-sm font-semibold text-red-600">{error}</span>}
@@ -211,16 +214,16 @@ const SettingsPage = () => {
 
             <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                 <div className="border-b border-slate-200 px-5 py-4">
-                    <h3 className="text-lg font-bold text-[#1f3a60]">Управление ролями</h3>
+                    <h3 className="text-lg font-bold text-[#1f3a60]">{t('settings.rolesTitle')}</h3>
                 </div>
 
                 <div className="overflow-x-auto">
                     <table className="w-full min-w-[740px] text-left">
                         <thead className="bg-slate-50 text-xs uppercase tracking-[0.08em] text-slate-500">
                             <tr>
-                                <th className="px-5 py-3 font-semibold">Пользователь</th>
-                                <th className="px-5 py-3 font-semibold">Роль</th>
-                                <th className="px-5 py-3 font-semibold">Создан</th>
+                                <th className="px-5 py-3 font-semibold">{t('settings.table.user')}</th>
+                                <th className="px-5 py-3 font-semibold">{t('settings.table.role')}</th>
+                                <th className="px-5 py-3 font-semibold">{t('settings.table.createdAt')}</th>
                             </tr>
                         </thead>
 
@@ -240,7 +243,13 @@ const SettingsPage = () => {
                                         </select>
                                     </td>
                                     <td className="px-5 py-3 text-slate-500">
-                                        {new Date(user.created_at).toLocaleString()}
+                                        {formatLocaleDate(user.created_at, locale, {
+                                            year: 'numeric',
+                                            month: 'short',
+                                            day: 'numeric',
+                                            hour: '2-digit',
+                                            minute: '2-digit',
+                                        })}
                                     </td>
                                 </tr>
                             ))}
