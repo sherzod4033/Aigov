@@ -7,7 +7,7 @@ const DEFAULT_LOCALE = 'tg';
 
 const translations = {
     ru: {
-        meta: { appTitle: 'KnowledgeAI' },
+        meta: { appTitle: 'SafeDocsAI' },
         layout: {
             nav: {
                 sources: 'Все источники',
@@ -17,7 +17,7 @@ const translations = {
                 settings: 'Настройки',
             },
             pageMeta: {
-                homeTitle: 'KnowledgeAI',
+                homeTitle: 'SafeDocsAI',
                 homeBadge: 'AI по источникам',
                 homeSearch: 'Введите ваш вопрос...',
                 askTitle: 'Ask',
@@ -97,11 +97,11 @@ const translations = {
                 hidePassword: 'Скрыть пароль',
                 showPassword: 'Показать пароль',
                 failed: 'Регистрация не удалась',
-                footer: 'KnowledgeAI Systems v1.0.4',
+                footer: 'SafeDocsAI Systems v1.0.4',
             },
         },
         chat: {
-            welcome: 'Здравствуйте! Я KnowledgeAI, ваш помощник по работе с источниками. Задавайте вопросы.',
+            welcome: 'Здравствуйте! Я SafeDocsAI, ваш помощник по работе с источниками. Задавайте вопросы.',
             quickQuestions: {
                 summary: 'Сделай краткое summary загруженных источников',
                 topics: 'Какие основные темы встречаются в документах?',
@@ -130,7 +130,7 @@ const translations = {
             feedbackBad: 'Плохой ответ',
             notebookPlaceholder: 'Спросите о материалах этого блокнота...',
             pagePlaceholder: 'Введите вопрос по выбранным источникам...',
-            disclaimer: 'KnowledgeAI может ошибаться. Проверяйте важную информацию по исходным материалам.',
+            disclaimer: 'SafeDocsAI может ошибаться. Проверяйте важную информацию по исходным материалам.',
         },
         documents: {
             status: {
@@ -329,7 +329,7 @@ const translations = {
         },
     },
     tg: {
-        meta: { appTitle: 'KnowledgeAI' },
+        meta: { appTitle: 'SafeDocsAI' },
         layout: {
             nav: {
                 sources: 'Ҳамаи манбаъҳо',
@@ -339,7 +339,7 @@ const translations = {
                 settings: 'Танзимот',
             },
             pageMeta: {
-                homeTitle: 'KnowledgeAI',
+                homeTitle: 'SafeDocsAI',
                 homeBadge: 'AI барои манбаъҳо',
                 homeSearch: 'Саволи худро ворид кунед...',
                 askTitle: 'Ask',
@@ -419,11 +419,11 @@ const translations = {
                 hidePassword: 'Пинҳон кардани рамз',
                 showPassword: 'Нишон додани рамз',
                 failed: 'Бақайдгирӣ анҷом нашуд',
-                footer: 'KnowledgeAI Systems v1.0.4',
+                footer: 'SafeDocsAI Systems v1.0.4',
             },
         },
         chat: {
-            welcome: 'Салом! Ман KnowledgeAI ҳастам, ёвари шумо барои кор бо манбаъҳо. Савол диҳед.',
+            welcome: 'Салом! Ман SafeDocsAI ҳастам, ёвари шумо барои кор бо манбаъҳо. Савол диҳед.',
             quickQuestions: {
                 summary: 'Хулосаи кӯтоҳи манбаъҳои боршударо соз',
                 topics: 'Кадом мавзӯъҳои асосӣ дар ҳуҷҷатҳо вомехӯранд?',
@@ -452,7 +452,7 @@ const translations = {
             feedbackBad: 'Ҷавоби бад',
             notebookPlaceholder: 'Дар бораи маводи ин дафтар савол диҳед...',
             pagePlaceholder: 'Саволро аз рӯи манбаъҳои интихобшуда ворид кунед...',
-            disclaimer: 'KnowledgeAI метавонад иштибоҳ кунад. Иттилооти муҳимро аз рӯи маводи аслӣ санҷед.',
+            disclaimer: 'SafeDocsAI метавонад иштибоҳ кунад. Иттилооти муҳимро аз рӯи маводи аслӣ санҷед.',
         },
         documents: {
             status: {
@@ -707,7 +707,7 @@ export const LocaleProvider = ({ children }) => {
 
     useEffect(() => {
         document.documentElement.lang = locale;
-        document.title = getTranslationValue(locale, 'meta.appTitle') || 'KnowledgeAI';
+        document.title = getTranslationValue(locale, 'meta.appTitle') || 'SafeDocsAI';
     }, [locale]);
 
     const t = useCallback((key, variables) => {

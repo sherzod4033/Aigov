@@ -6,7 +6,7 @@ from app.modules.rag.text_utils import boost_article_chunks, detect_article_refe
 
 class LegalDomainProfile(DomainProfile):
     def __init__(self) -> None:
-        super().__init__(name="legal", assistant_name="KnowledgeAI Legal")
+        super().__init__(name="legal", assistant_name="SafeDocsAI Legal")
 
     def rerank_results(
         self, query_text: str, results: dict[str, Any]

@@ -7,7 +7,7 @@ from typing import Any
 @dataclass(frozen=True)
 class DomainProfile:
     name: str
-    assistant_name: str = "KnowledgeAI"
+    assistant_name: str = "SafeDocsAI"
 
     def no_data_answer(self, language: str) -> str:
         if language == "tj":

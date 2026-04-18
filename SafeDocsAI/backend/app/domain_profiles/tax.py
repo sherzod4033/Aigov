@@ -6,12 +6,14 @@ class TaxDomainProfile(LegalDomainProfile):
     def __init__(self) -> None:
         super().__init__()
         object.__setattr__(self, "name", "tax")
-        object.__setattr__(self, "assistant_name", "AndozAI")
+        object.__setattr__(self, "assistant_name", "SafeDocsAI")
 
     def greeting(self, language: str) -> str:
         if language == "tj":
-            return "Салом! Ман AndozAI, ёрдамчии шумо оид ба андоз. Ба ман савол диҳед."
-        return "Здравствуйте! Я AndozAI, ваш налоговый помощник. Задавайте вопросы."
+            return (
+                "Салом! Ман SafeDocsAI, ёрдамчии шумо оид ба андоз. Ба ман савол диҳед."
+            )
+        return "Здравствуйте! Я SafeDocsAI, ваш налоговый помощник. Задавайте вопросы."
 
     def prompt_injection_message(self, language: str) -> str:
         if language == "tj":

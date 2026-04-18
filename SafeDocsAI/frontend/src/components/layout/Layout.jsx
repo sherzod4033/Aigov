@@ -140,7 +140,7 @@ const Layout = () => {
 
                     {!sidebarCollapsed ? (
                     <div>
-                        <p className="text-2xl font-bold leading-none">KnowledgeAI</p>
+                        <p className="text-2xl font-bold leading-none">SafeDocsAI</p>
                     </div>
                     ) : null}
                 </div>

@@ -64,7 +64,7 @@ const LoginPage = () => {
                                     <Shield className="h-6 w-6" />
                                 </div>
                                 <div className="text-left">
-                                    <p className="text-4xl font-extrabold leading-none text-[#1f3a60]">Knowledge<span className="text-[#c5a059]">AI</span></p>
+                                    <p className="text-4xl font-extrabold leading-none text-[#1f3a60]">SafeDocs<span className="text-[#c5a059]">AI</span></p>
                                 </div>
                             </div>
                         </CardHeader>

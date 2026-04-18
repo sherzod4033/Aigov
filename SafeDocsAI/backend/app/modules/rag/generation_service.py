@@ -88,7 +88,7 @@ class GenerationService:
         chat_history: List[Dict[str, str]] | None = None,
         language: str = "ru",
         model: str = DEFAULT_CHAT_MODEL,
-        assistant_name: str = "KnowledgeAI",
+        assistant_name: str = "SafeDocsAI",
         answer_rules: str | None = None,
         no_data_answer: str | None = None,
         context_metadata: List[Dict[str, Any]] | None = None,
