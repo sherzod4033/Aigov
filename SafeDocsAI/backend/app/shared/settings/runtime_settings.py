@@ -14,6 +14,8 @@ class RuntimeSettingsService:
         "top_k": 5,
         "default_domain_profile": "tax",
         "enable_condense_query": True,
+        "contextual_embedding_enabled": False,
+        "contextual_embedding_model": "gemma3:4b",
     }
 
     @classmethod
@@ -78,6 +80,12 @@ class RuntimeSettingsService:
         merged["enable_condense_query"] = cls._normalize_bool(
             merged.get("enable_condense_query"), default=True
         )
+        merged["contextual_embedding_enabled"] = cls._normalize_bool(
+            merged.get("contextual_embedding_enabled"), default=False
+        )
+        merged["contextual_embedding_model"] = str(
+            merged.get("contextual_embedding_model") or cls.DEFAULTS["contextual_embedding_model"]
+        ).strip()
         if not merged["chat_model"]:
             merged["chat_model"] = cls.DEFAULTS["chat_model"]
         if not merged["embedding_model"]:
@@ -134,6 +142,15 @@ class RuntimeSettingsService:
             current["enable_condense_query"] = cls._normalize_bool(
                 patch["enable_condense_query"], default=True
             )
+        if "contextual_embedding_enabled" in patch:
+            current["contextual_embedding_enabled"] = cls._normalize_bool(
+                patch["contextual_embedding_enabled"], default=False
+            )
+        if "contextual_embedding_model" in patch:
+            model = str(patch["contextual_embedding_model"] or "").strip()
+            if model and model not in cls.model_catalog()["available_chat_models"]:
+                raise ValueError(f"Unsupported contextual embedding model: {model}")
+            current["contextual_embedding_model"] = model or cls.DEFAULTS["contextual_embedding_model"]
 
         path = cls._settings_path()
         path.write_text(

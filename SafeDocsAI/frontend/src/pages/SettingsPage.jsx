@@ -22,6 +22,9 @@ const SettingsPage = () => {
         chat_model: '',
         embedding_model: '',
         enable_condense_query: true,
+        contextual_embedding_enabled: false,
+        contextual_embedding_model: '',
+        top_k: 10,
         available_models: [],
         available_chat_models: [],
         available_embedding_models: [],
@@ -77,6 +80,9 @@ const SettingsPage = () => {
                 chat_model: runtimeSettings.chat_model,
                 embedding_model: runtimeSettings.embedding_model,
                 enable_condense_query: runtimeSettings.enable_condense_query,
+                contextual_embedding_enabled: runtimeSettings.contextual_embedding_enabled,
+                contextual_embedding_model: runtimeSettings.contextual_embedding_model,
+                top_k: Number(runtimeSettings.top_k) || 10,
             };
             const response = await settingsService.update(payload);
             const settingsData = response.data || {};
@@ -201,6 +207,66 @@ const SettingsPage = () => {
                             </span>
                         </span>
                     </label>
+                </div>
+
+                <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <label className="mb-2 block text-sm font-semibold text-slate-700">{t('settings.topK')}</label>
+                    <input
+                        type="number"
+                        min={1}
+                        max={20}
+                        value={runtimeSettings.top_k ?? 10}
+                        onChange={(event) => setRuntimeSettings((prev) => ({
+                            ...prev,
+                            top_k: Number(event.target.value),
+                        }))}
+                        className="h-10 w-32 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#1f3a60]/25"
+                    />
+                    <p className="mt-2 text-xs text-slate-500">{t('settings.topKHint')}</p>
+                </div>
+
+                <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-4">
+                    <label className="flex items-start gap-3">
+                        <input
+                            type="checkbox"
+                            checked={Boolean(runtimeSettings.contextual_embedding_enabled)}
+                            onChange={(event) => setRuntimeSettings((prev) => ({
+                                ...prev,
+                                contextual_embedding_enabled: event.target.checked,
+                            }))}
+                            className="mt-1 h-4 w-4 rounded border-slate-300 text-[#1f3a60] focus:ring-[#1f3a60]/25"
+                        />
+                        <span>
+                            <span className="block text-sm font-semibold text-slate-800">{t('settings.contextualEmbedding')}</span>
+                            <span className="mt-1 block text-xs text-slate-500">
+                                {t('settings.contextualEmbeddingHint')}
+                            </span>
+                        </span>
+                    </label>
+
+                    <div>
+                        <label className="mb-2 block text-sm font-semibold text-slate-700">{t('settings.contextualModel')}</label>
+                        <select
+                            value={runtimeSettings.contextual_embedding_model}
+                            onChange={(event) => setRuntimeSettings((prev) => ({
+                                ...prev,
+                                contextual_embedding_model: event.target.value,
+                            }))}
+                            disabled={!runtimeSettings.available_chat_models?.length}
+                            className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#1f3a60]/25 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                            {runtimeSettings.available_chat_models?.length ? (
+                                runtimeSettings.available_chat_models.map((model) => (
+                                    <option key={model} value={model}>{model}</option>
+                                ))
+                            ) : (
+                                <option value="">{t('settings.noContextualModels')}</option>
+                            )}
+                        </select>
+                        <p className="mt-2 text-xs text-slate-500">
+                            {t('settings.contextualModelHint')}
+                        </p>
+                    </div>
                 </div>
 
                 <div className="mt-5 flex flex-wrap items-center gap-3">

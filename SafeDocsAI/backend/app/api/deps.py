@@ -50,3 +50,13 @@ async def get_current_active_superuser(
             status_code=400, detail="The user doesn't have enough privileges"
         )
     return current_user
+
+
+async def get_current_content_manager_or_admin(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    if current_user.role not in ("admin", "content_manager"):
+        raise HTTPException(
+            status_code=403, detail="The user does not have enough privileges"
+        )
+    return current_user

@@ -533,6 +533,15 @@ def rerank_retrieval_candidates(
     ]
     if not filtered:
         filtered = list(deduplicated)
+    # Guarantee minimum 3 chunks
+    MIN_CHUNKS = 3
+    if len(filtered) < MIN_CHUNKS and len(deduplicated) > len(filtered):
+        existing_keys = {candidate_identity(i) for i in filtered}
+        for item in deduplicated:
+            if len(filtered) >= MIN_CHUNKS:
+                break
+            if candidate_identity(item) not in existing_keys:
+                filtered.append(item)
 
     normalized_query = RAGService.normalize_query(query_text)
     query_tokens = set(RAGService._query_tokens(query_text))

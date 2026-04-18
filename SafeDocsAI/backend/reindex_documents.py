@@ -21,6 +21,7 @@ from app.models.models import Document, Chunk
 from app.services.document_service import DocumentService
 from app.services.hybrid_chunker import HybridChunker
 from app.services.rag_service import RAGService
+from app.shared.settings.runtime_settings import RuntimeSettingsService
 
 
 def _build_embedding_text(chunk_text, doc_name, page=None, section_json=None):
@@ -46,6 +47,42 @@ def _build_embedding_text(chunk_text, doc_name, page=None, section_json=None):
     return chunk_text
 
 
+async def _generate_llm_context(chunk_text, doc_name, doc_language, model,
+                               doc_intro="", section_path=None):
+    """Call LLM to generate contextual description for a chunk."""
+    from app.modules.rag.model_manager import ModelManager
+    lang_instruction = {
+        "ru": "Отвечай на русском языке.",
+        "tj": "Ба забони тоҷикӣ ҷавоб деҳ.",
+        "en": "Answer in English.",
+    }.get(doc_language, "Answer in the same language as the text.")
+    doc_intro_block = f"Document beginning:\n{doc_intro[:1500]}\n\n" if doc_intro else ""
+    section_block = ""
+    if section_path:
+        section_str = " > ".join(section_path)
+        section_block = f"Section: {section_str}\n\n"
+    prompt = (
+        f"You are a document analyst. Write 1-2 concise sentences describing "
+        f"what this chunk is about and where it fits in the document. "
+        f"Use the document beginning and section path as context. "
+        f"Be specific. {lang_instruction}\n\n"
+        f"Document: {doc_name}\n"
+        f"{doc_intro_block}"
+        f"{section_block}"
+        f"Chunk:\n{chunk_text[:600]}\n\nContext:"
+    )
+    try:
+        manager = ModelManager()
+        result = await manager.chat(
+            messages=[{"role": "user", "content": prompt}],
+            model=model,
+        )
+        return result.strip()
+    except Exception as exc:
+        print(f"  WARNING: LLM context call failed: {exc}")
+        return ""
+
+
 async def reindex_all_documents():
     print("Starting re-indexing with HybridChunker pipeline...")
 
@@ -68,6 +105,14 @@ async def reindex_all_documents():
         overlap_tokens=CHUNKER_OVERLAP_TOKENS,
         max_chars=CHUNKER_MAX_CHARS,
     )
+
+    rt = RuntimeSettingsService.get_settings()
+    ctx_enabled = rt.get("contextual_embedding_enabled", False)
+    ctx_model = rt.get("contextual_embedding_model", "")
+    if ctx_enabled:
+        print(f"Contextual embedding enabled (model: {ctx_model})")
+    else:
+        print("Contextual embedding disabled")
 
     async with async_session() as session:
         result = await session.exec(select(Document))
@@ -124,6 +169,7 @@ async def reindex_all_documents():
             ids = []
             metadatas = []
 
+            doc_intro = " ".join(cr.text for cr in chunk_results[:3])[:1500] if ctx_enabled else ""
             for cr in chunk_results:
                 chunk = Chunk(
                     text=cr.text,
@@ -136,9 +182,16 @@ async def reindex_all_documents():
                 await session.flush()
                 await session.refresh(chunk)
 
-                docs_text.append(_build_embedding_text(
-                    chunk.text, doc.name, chunk.page, chunk.section,
-                ))
+                base_text = _build_embedding_text(chunk.text, doc.name, chunk.page, chunk.section)
+                if ctx_enabled and ctx_model:
+                    llm_ctx = await _generate_llm_context(
+                        chunk.text, doc.name, doc.language or "ru", ctx_model,
+                        doc_intro=doc_intro, section_path=cr.section_path or [],
+                    )
+                    embedding_text = f"{llm_ctx} {base_text}" if llm_ctx else base_text
+                else:
+                    embedding_text = base_text
+                docs_text.append(embedding_text)
                 ids.append(str(chunk.id))
                 metadata = {
                     "doc_id": doc.id,

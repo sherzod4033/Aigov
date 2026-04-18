@@ -29,6 +29,8 @@ class RuntimeSettingsResponse(BaseModel):
     ollama_available: bool
     ollama_error: str | None = None
     available_domain_profiles: list[str]
+    contextual_embedding_enabled: bool = False
+    contextual_embedding_model: str = ""
 
 
 class RuntimeSettingsUpdate(BaseModel):
@@ -39,6 +41,8 @@ class RuntimeSettingsUpdate(BaseModel):
     retrieval_top_k: int | None = Field(default=None, ge=1, le=50)
     top_k: int | None = Field(default=None, ge=1, le=20)
     default_domain_profile: str | None = None
+    contextual_embedding_enabled: bool | None = None
+    contextual_embedding_model: str | None = None
 
 
 class UserRoleItem(BaseModel):
@@ -72,6 +76,8 @@ async def get_runtime_settings(
         ollama_available=model_catalog["ollama_available"],
         ollama_error=model_catalog["ollama_error"],
         available_domain_profiles=list_domain_profiles(),
+        contextual_embedding_enabled=runtime_settings.get("contextual_embedding_enabled", False),
+        contextual_embedding_model=runtime_settings.get("contextual_embedding_model", ""),
     )
 
 
@@ -101,6 +107,8 @@ async def update_runtime_settings(
         ollama_available=model_catalog["ollama_available"],
         ollama_error=model_catalog["ollama_error"],
         available_domain_profiles=list_domain_profiles(),
+        contextual_embedding_enabled=updated.get("contextual_embedding_enabled", False),
+        contextual_embedding_model=updated.get("contextual_embedding_model", ""),
     )
 
 

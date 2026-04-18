@@ -120,19 +120,22 @@ class ModelManager:
         return names
 
     async def chat(
-        self, messages: list[dict[str, str]], model: str | None = None
+        self, messages: list[dict[str, str]], model: str | None = None, max_tokens: int | None = None, think: bool = False
     ) -> str:
         resolved_model = self.resolve_chat_model(model)
 
         try:
-            response = await self._ollama_async_client.chat(
-                model=resolved_model,
-                messages=messages,
-            )
+            kwargs: dict = dict(model=resolved_model, messages=messages, think=think, keep_alive=-1)
+            options: dict = {"num_ctx": 12288}
+            if max_tokens is not None:
+                options["num_predict"] = max_tokens
+            kwargs["options"] = options
+            response = await self._ollama_async_client.chat(**kwargs)
         except Exception as exc:
             raise self._wrap_provider_error("Ollama", exc) from exc
 
-        return response["message"]["content"].strip()
+        content = response["message"]["content"].strip()
+        return content
 
     def embed(
         self, texts: Sequence[str], model: str | None = None

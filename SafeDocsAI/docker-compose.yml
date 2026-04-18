@@ -31,7 +31,7 @@ services:
       dockerfile: Dockerfile
     container_name: andozai-backend
     ports:
-      - "127.0.0.1:8001:8001"
+      - "0.0.0.0:8001:8001"
     environment:
       - ENVIRONMENT=production
       - POSTGRES_SERVER=postgres
@@ -43,10 +43,10 @@ services:
       - CHROMA_PORT=8000
       - OLLAMA_API_BASE=${OLLAMA_API_BASE:-http://host.docker.internal:11434}
       - OLLAMA_TIMEOUT_SECONDS=${OLLAMA_TIMEOUT_SECONDS:-120}
-      - OLLAMA_MODEL_CHAT=${OLLAMA_MODEL_CHAT:-gemma3n:e4b}
-      - OLLAMA_MODEL_EMBEDDING=${OLLAMA_MODEL_EMBEDDING:-nomic-embed-text}
+      - OLLAMA_MODEL_CHAT=${OLLAMA_MODEL_CHAT:-gemma4:27b}
+      - OLLAMA_MODEL_EMBEDDING=${OLLAMA_MODEL_EMBEDDING:-qwen3-embedding:8b}
       - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
-      - CORS_ORIGINS=http://localhost:5173,http://localhost:4173
+      - CORS_ORIGINS=http://localhost:5173,http://localhost:4173,http://64.247.206.198,http://64.247.206.198:80
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

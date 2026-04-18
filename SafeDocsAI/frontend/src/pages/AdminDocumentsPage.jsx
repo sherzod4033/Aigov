@@ -179,9 +179,19 @@ const AdminDocumentsPage = ({ notebookId }) => {
             }
 
             try {
-                await api.post('/sources/upload', formData, {
+                const response = await api.post('/sources/upload', formData, {
                     headers: { 'Content-Type': 'multipart/form-data' },
                 });
+                // Сразу добавляем документ в список со статусом "обработка"
+                const serverDoc = response.data;
+                const optimisticDoc = serverDoc || {
+                    id: `temp-${Date.now()}-${file.name}`,
+                    name: file.name,
+                    size: file.size,
+                    language: 'ru',
+                    created_at: new Date().toISOString(),
+                };
+                setDocuments((prev) => [{ ...optimisticDoc, status: 'indexing' }, ...prev]);
                 return { success: true, name: file.name };
             } catch (error) {
                 return { success: false, name: file.name, error: error.response?.data?.detail || t('documents.uploadError') };
@@ -215,9 +225,17 @@ const AdminDocumentsPage = ({ notebookId }) => {
 
         try {
             const response = await api.get(`/sources/${docId}/chunks`);
+            const fetchedChunks = response.data || [];
+            
+            if (fetchedChunks.length === 0) {
+                setDocuments((prevDocs) => 
+                    prevDocs.map((doc) => doc.id === docId ? { ...doc, status: 'indexing' } : doc)
+                );
+            }
+
             setChunksModal((prev) => ({
                 ...prev,
-                chunks: response.data || [],
+                chunks: fetchedChunks,
                 isLoading: false,
             }));
         } catch (error) {

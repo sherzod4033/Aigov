@@ -34,7 +34,7 @@ class AttachSourcesResponse(BaseModel):
 async def upload_document(
     file: UploadFile,
     notebook_id: Optional[int] = Form(default=None),
-    current_user: User = Depends(deps.get_current_active_superuser),
+    current_user: User = Depends(deps.get_current_content_manager_or_admin),
     session: AsyncSession = Depends(deps.get_session),
 ) -> Any:
     return await DocumentModuleService.upload_document(
@@ -48,7 +48,7 @@ async def read_documents(
     limit: int = 100,
     notebook_id: int | None = Query(default=None),
     session: AsyncSession = Depends(deps.get_session),
-    current_user: User = Depends(deps.get_current_active_superuser),
+    current_user: User = Depends(deps.get_current_content_manager_or_admin),
 ) -> Any:
     return await DocumentModuleService.read_documents(
         session=session, skip=skip, limit=limit, notebook_id=notebook_id
@@ -58,7 +58,7 @@ async def read_documents(
 @router.post("/attach", response_model=AttachSourcesResponse)
 async def attach_documents(
     payload: AttachSourcesPayload,
-    current_user: User = Depends(deps.get_current_active_superuser),
+    current_user: User = Depends(deps.get_current_content_manager_or_admin),
     session: AsyncSession = Depends(deps.get_session),
 ) -> Any:
     if not payload.source_ids:
@@ -76,7 +76,7 @@ async def attach_documents(
 async def get_document_chunks(
     id: int,
     session: AsyncSession = Depends(deps.get_session),
-    current_user: User = Depends(deps.get_current_active_superuser),
+    current_user: User = Depends(deps.get_current_content_manager_or_admin),
 ) -> Any:
     return await DocumentModuleService.get_document_chunks(
         session=session, document_id=id
@@ -87,7 +87,7 @@ async def get_document_chunks(
 async def delete_document(
     id: int,
     session: AsyncSession = Depends(deps.get_session),
-    current_user: User = Depends(deps.get_current_active_superuser),
+    current_user: User = Depends(deps.get_current_content_manager_or_admin),
 ) -> Any:
     return await DocumentModuleService.delete_document(session=session, document_id=id)
 

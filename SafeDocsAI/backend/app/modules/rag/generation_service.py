@@ -11,22 +11,27 @@ def format_context_for_llm(
     context: List[str],
     context_metadata: List[Dict[str, Any]] | None = None,
 ) -> str:
-    """Format context chunks with source metadata for the LLM prompt."""
+    """Format context chunks separating system metadata from document text."""
     if not context:
         return ""
-    if not context_metadata or len(context_metadata) != len(context):
-        return "\n\n---\n\n".join(context)
     parts: list[str] = []
-    for text, meta in zip(context, context_metadata):
-        doc_name = meta.get("doc_name") or ""
-        page = meta.get("page")
-        header_parts = []
-        if doc_name:
-            header_parts.append(doc_name)
-        if page is not None:
-            header_parts.append(f"стр. {page}")
-        header = f"[Источник: {', '.join(header_parts)}]" if header_parts else ""
-        parts.append(f"{header}\n{text}" if header else text)
+    for i, text in enumerate(context):
+        meta = (context_metadata[i] if context_metadata and i < len(context_metadata) else {}) or {}
+
+        # Split: "{llm_ctx} [{doc_name | section | стр. N}] {original_text}"
+        bracket_match = re.search(r'\[([^\]]+)\]\s*', text)
+        if bracket_match:
+            llm_ctx = text[:bracket_match.start()].strip()
+            original_text = text[bracket_match.end():].strip()
+        else:
+            llm_ctx = ""
+            original_text = text.strip()
+
+        chunk_parts: list[str] = []
+        if llm_ctx:
+            chunk_parts.append(f"### [Метаданные системы]: {llm_ctx}")
+        chunk_parts.append(f"### [Текст документа]: {original_text}")
+        parts.append("\n".join(chunk_parts))
     return "\n\n---\n\n".join(parts)
 
 

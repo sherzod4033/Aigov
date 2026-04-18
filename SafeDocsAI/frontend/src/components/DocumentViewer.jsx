@@ -5,13 +5,11 @@ import 'react-pdf/dist/Page/TextLayer.css';
 import { X, ChevronLeft, ChevronRight, Loader2, ZoomIn, ZoomOut } from 'lucide-react';
 import { sourcesService } from '../services/sourcesService';
 
-pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.min.mjs',
-  import.meta.url,
-).toString();
+pdfjs.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@5.4.296/build/pdf.worker.min.mjs';
 
 const DocumentViewer = ({ docId, docName, chunkId, page, onClose }) => {
   const [fileBlob, setFileBlob] = useState(null);
+  const [fileUrl, setFileUrl] = useState(null);
   const [fileType, setFileType] = useState(null);
   const [textContent, setTextContent] = useState('');
   const [chunkContext, setChunkContext] = useState(null);
@@ -50,6 +48,7 @@ const DocumentViewer = ({ docId, docName, chunkId, page, onClose }) => {
           if (contentType.includes('pdf') || ext === 'pdf') {
             setFileType('pdf');
             setFileBlob(blob);
+            setFileUrl(URL.createObjectURL(blob));
           } else {
             setFileType('text');
             const text = await blob.text();
@@ -80,7 +79,7 @@ const DocumentViewer = ({ docId, docName, chunkId, page, onClose }) => {
       }
     };
     load();
-    return () => { cancelled = true; };
+    return () => { cancelled = true; setFileUrl((u) => { if (u) URL.revokeObjectURL(u); return null; }); };
   }, [docId, chunkId, ext]);
 
   useEffect(() => {
@@ -189,11 +188,11 @@ const DocumentViewer = ({ docId, docName, chunkId, page, onClose }) => {
 
           {!loading && !error && fileType === 'text' && renderTextContent()}
 
-          {!loading && !error && fileType === 'pdf' && fileBlob && (
+          {!loading && !error && fileType === 'pdf' && fileUrl && (
             <div className="flex flex-col items-center">
               {renderPdfHighlight()}
               <Document
-                file={fileBlob}
+                file={fileUrl}
                 onLoadSuccess={onDocumentLoadSuccess}
                 loading={<Loader2 className="mx-auto mt-12 h-8 w-8 animate-spin text-slate-400" />}
               >
