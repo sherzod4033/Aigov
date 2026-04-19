@@ -1,6 +1,7 @@
 import unittest
 import os
 import tempfile
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 from types import SimpleNamespace
 
@@ -19,6 +20,7 @@ from app.modules.documents.service import DocumentModuleService
 from app.services.document_service import DocumentService
 from app.services.hybrid_chunker import ChunkResult
 from app.services.rag_service import RAGService
+from app.shared.settings.runtime_settings import RuntimeSettingsService
 
 
 class DocumentServiceTests(unittest.TestCase):
@@ -326,6 +328,23 @@ class DocumentModuleServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(document.id, 101)
         self.assertEqual(session.commit.await_count, 3)
         rag_instance.add_documents.assert_called_once()
+
+
+class RuntimeSettingsServiceTests(unittest.TestCase):
+    def test_update_settings_persists_reranker_enabled_flag(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            settings_path = Path(temp_dir) / "runtime_settings.json"
+            with patch.object(RuntimeSettingsService, "_settings_path", return_value=settings_path):
+                updated = RuntimeSettingsService.update_settings({"reranker_enabled": True})
+                loaded = RuntimeSettingsService.get_settings()
+
+                self.assertTrue(updated["reranker_enabled"])
+                self.assertTrue(loaded["reranker_enabled"])
+
+                with open(settings_path, "r", encoding="utf-8") as file_obj:
+                    persisted = file_obj.read()
+
+                self.assertIn('"reranker_enabled": true', persisted)
 
 
 class HybridRetrievalTests(unittest.IsolatedAsyncioTestCase):

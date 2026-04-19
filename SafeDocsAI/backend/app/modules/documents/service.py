@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -15,6 +16,8 @@ from app.services.source_service import SourceService
 from app.modules.rag.service import RAGService
 
 logger = logging.getLogger(__name__)
+
+_INDEXING_SEMAPHORE = asyncio.Semaphore(1)  # одновременно только 1 документ
 
 _YEAR_RE = re.compile(r'((?:19|20)\d{2})')
 
@@ -83,21 +86,32 @@ async def _generate_llm_context(
         section_block = f"Section: {section_str}\n\n"
 
     prompt = (
-        f"You are a document analyst. Write 1-2 concise sentences describing "
-        f"what this chunk is about and where it fits in the document. "
-        f"Use the document beginning and section path as context. "
-        f"Be specific. {lang_instruction}\n\n"
+        f"You are a search-index assistant. Your output will be prepended to a document chunk "
+        f"to improve retrieval. Follow the format exactly.\n\n"
+        f"Output format (do not add any other text):\n"
+        f"DESCRIPTION: <2 sentences — what this chunk is about and where it fits in the document. "
+        f"Do NOT copy sentences from the chunk verbatim.>\n"
+        f"KEYWORDS: <8-12 comma-separated keywords and synonyms, including: key terms from the chunk, "
+        f"alternative phrasings, ALL numbers/dates/amounts mentioned, and relevant words from the filename \"{doc_name}\".>\n\n"
+        f"Rules:\n"
+        f"- Always include every number, date, percentage, and monetary amount from the chunk in KEYWORDS.\n"
+        f"- Include synonyms from both the document language and Russian if they differ.\n"
+        f"- DESCRIPTION must explain placement (e.g. 'This chunk is from the section on...'), not just repeat content.\n"
+        f"- {lang_instruction}\n\n"
         f"Document: {doc_name}\n"
         f"{doc_intro_block}"
         f"{section_block}"
-        f"Chunk:\n{chunk_text[:600]}\n\nContext:"
+        f"Chunk:\n{chunk_text[:600]}\n\nOutput:"
     )
     try:
+        from app.services.runtime_settings_service import RuntimeSettingsService
+        ctx_num_ctx = RuntimeSettingsService.get_settings().get("contextual_embedding_num_ctx", 8192)
         manager = ModelManager()
         result = await manager.chat(
             messages=[{"role": "user", "content": prompt}],
             model=model,
-            max_tokens=120,
+            max_tokens=220,
+            num_ctx=ctx_num_ctx,
         )
         return result.strip()
     except Exception as exc:
@@ -165,11 +179,21 @@ class DocumentModuleService:
         await session.commit()
         await session.refresh(doc)
 
+        async with _INDEXING_SEMAPHORE:
+            await DocumentModuleService._index_document(
+                session=session, doc=doc, chunk_results=chunk_results,
+            )
+        await session.refresh(doc)
+        return doc
+
+    @staticmethod
+    async def _index_document(session, doc, chunk_results):
         rag_service = RAGService()
         from app.shared.settings.runtime_settings import RuntimeSettingsService as _RSS
         _rt = _RSS.get_settings()
         _ctx_enabled = _rt.get("contextual_embedding_enabled", False)
         _ctx_model = _rt.get("contextual_embedding_model", "")
+        detected_language = doc.language or "ru"
         doc_intro = " ".join(cr.text for cr in chunk_results[:3])[:1500] if _ctx_enabled else ""
         docs_text: list[str] = []
         ids: list[str] = []

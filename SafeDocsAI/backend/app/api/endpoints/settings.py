@@ -31,6 +31,10 @@ class RuntimeSettingsResponse(BaseModel):
     available_domain_profiles: list[str]
     contextual_embedding_enabled: bool = False
     contextual_embedding_model: str = ""
+    chat_model_num_ctx: int = 20000
+    contextual_embedding_num_ctx: int = 8192
+    reranker_enabled: bool = False
+    reranker_model: str = "gemma4:e4b"
 
 
 class RuntimeSettingsUpdate(BaseModel):
@@ -43,6 +47,10 @@ class RuntimeSettingsUpdate(BaseModel):
     default_domain_profile: str | None = None
     contextual_embedding_enabled: bool | None = None
     contextual_embedding_model: str | None = None
+    chat_model_num_ctx: int | None = None
+    contextual_embedding_num_ctx: int | None = None
+    reranker_enabled: bool | None = None
+    reranker_model: str | None = None
 
 
 class UserRoleItem(BaseModel):
@@ -78,6 +86,10 @@ async def get_runtime_settings(
         available_domain_profiles=list_domain_profiles(),
         contextual_embedding_enabled=runtime_settings.get("contextual_embedding_enabled", False),
         contextual_embedding_model=runtime_settings.get("contextual_embedding_model", ""),
+        chat_model_num_ctx=runtime_settings.get("chat_model_num_ctx", 20000),
+        contextual_embedding_num_ctx=runtime_settings.get("contextual_embedding_num_ctx", 8192),
+        reranker_enabled=runtime_settings.get("reranker_enabled", False),
+        reranker_model=runtime_settings.get("reranker_model", "gemma4:e4b"),
     )
 
 
@@ -109,6 +121,10 @@ async def update_runtime_settings(
         available_domain_profiles=list_domain_profiles(),
         contextual_embedding_enabled=updated.get("contextual_embedding_enabled", False),
         contextual_embedding_model=updated.get("contextual_embedding_model", ""),
+        chat_model_num_ctx=updated.get("chat_model_num_ctx", 20000),
+        contextual_embedding_num_ctx=updated.get("contextual_embedding_num_ctx", 8192),
+        reranker_enabled=updated.get("reranker_enabled", False),
+        reranker_model=updated.get("reranker_model", "gemma4:e4b"),
     )
 
 

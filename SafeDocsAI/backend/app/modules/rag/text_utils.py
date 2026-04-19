@@ -61,14 +61,24 @@ def stem_simple(word: str) -> str:
     return word
 
 
-def tokenize(text: str) -> set[str]:
-    raw_tokens = re.findall(r"[\w\-]+", (text or "").lower())
+def _char_ngrams(word: str, n: int = 3) -> set[str]:
+    """Generate character n-grams for fuzzy matching (typo tolerance)."""
+    if len(word) <= n:
+        return {word}
+    return {word[i:i + n] for i in range(len(word) - n + 1)}
+
+
+def tokenize(text: str, ngram_size: int = 3) -> set[str]:
+    raw_tokens = re.findall(r"[а-яёА-ЯЁa-zA-Z0-9ӯқҳҷғӣӮҚҲҶҒӢ\-]+", (text or "").lower())
     normalized: set[str] = set()
     for token in raw_tokens:
         if token not in RU_TJ_STOPWORDS:
             stemmed = stem_simple(token)
             if len(stemmed) >= 2 or stemmed.isdigit():
                 normalized.add(stemmed)
+                # Add character n-grams for words long enough to have typos
+                if len(stemmed) >= ngram_size + 1:
+                    normalized.update(_char_ngrams(stemmed, ngram_size))
         if "-" in token:
             for piece in token.split("-"):
                 if piece not in RU_TJ_STOPWORDS:

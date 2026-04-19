@@ -8,6 +8,7 @@ pymupdf
 pytesseract
 chromadb
 sentence-transformers
+accelerate
 ollama
 python-dotenv
 pydantic-settings

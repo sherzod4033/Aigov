@@ -120,13 +120,13 @@ class ModelManager:
         return names
 
     async def chat(
-        self, messages: list[dict[str, str]], model: str | None = None, max_tokens: int | None = None, think: bool = False
+        self, messages: list[dict[str, str]], model: str | None = None, max_tokens: int | None = None, think: bool = False, num_ctx: int | None = None
     ) -> str:
         resolved_model = self.resolve_chat_model(model)
 
         try:
             kwargs: dict = dict(model=resolved_model, messages=messages, think=think, keep_alive=-1)
-            options: dict = {"num_ctx": 12288}
+            options: dict = {"num_ctx": num_ctx if num_ctx is not None else 12288}
             if max_tokens is not None:
                 options["num_predict"] = max_tokens
             kwargs["options"] = options

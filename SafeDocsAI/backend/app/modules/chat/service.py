@@ -729,12 +729,79 @@ async def run_hybrid_retrieval(
         :retrieval_top_k
     ]
 
+    if not vector_candidates:
+        logger.warning(
+            "run_hybrid_retrieval: ChromaDB returned 0 candidates for query=%r (allowed_doc_ids=%s)",
+            search_query,
+            allowed_doc_ids,
+        )
+    if not lexical_candidates:
+        logger.warning(
+            "run_hybrid_retrieval: BM25 returned 0 candidates for query=%r (allowed_doc_ids=%s)",
+            search_query,
+            allowed_doc_ids,
+        )
+
     fused_candidates = fuse_candidates_with_rrf(vector_candidates, lexical_candidates)
     final_chunks = rerank_retrieval_candidates(
         fused_candidates,
         query_text=search_query,
         final_top_k=final_top_k,
     )
+
+    if not final_chunks:
+        logger.warning(
+            "run_hybrid_retrieval: final result is empty after RRF fusion "
+            "(vector=%d, lexical=%d, fused=%d) for query=%r — triggering top-3 fallback",
+            len(vector_candidates),
+            len(lexical_candidates),
+            len(fused_candidates),
+            search_query,
+        )
+        # Hard fallback: get any 3 chunks from ChromaDB ignoring relevance
+        try:
+            fallback_results = rag_service.query_documents(
+                search_query,
+                n_results=3,
+                where={"doc_id": {"$in": list(allowed_doc_ids)}} if allowed_doc_ids else None,
+            )
+            fb_docs = fallback_results.get("documents", [[]])[0]
+            fb_ids = fallback_results.get("ids", [[]])[0]
+            fb_metas = fallback_results.get("metadatas", [[]])[0]
+            fb_dists = fallback_results.get("distances", [[]])[0]
+            final_chunks = collect_chunk_candidates(
+                context=fb_docs,
+                context_chunk_ids=fb_ids,
+                context_metadatas=fb_metas,
+                context_distances=fb_dists,
+                allowed_doc_ids=allowed_doc_ids,
+            )
+            for item in final_chunks:
+                item["retrieval_method"] = "fallback"
+            logger.warning(
+                "run_hybrid_retrieval: fallback returned %d chunks", len(final_chunks)
+            )
+        except Exception as fb_exc:
+            logger.error("run_hybrid_retrieval: fallback also failed: %s", fb_exc)
+
+    # Optional reranker pass
+    runtime_settings = RuntimeSettingsService.get_settings()
+    if runtime_settings.get("reranker_enabled") and final_chunks:
+        reranker_model = runtime_settings.get("reranker_model", "gemma4:e4b")
+        try:
+            from app.modules.rag.reranker_service import rerank_candidates
+            from app.modules.rag.model_manager import ModelManager
+            logger.debug("Reranker: applying %s to %d chunks", reranker_model, len(final_chunks))
+            final_chunks = await rerank_candidates(
+                candidates=final_chunks,
+                query=search_query,
+                model=reranker_model,
+                model_manager=ModelManager(),
+                top_k=final_top_k,
+            )
+        except Exception as rr_exc:
+            logger.warning("Reranker failed, keeping original order: %s", rr_exc)
+
     result = {
         "vector_candidates": vector_candidates,
         "lexical_candidates": lexical_candidates,
@@ -1112,8 +1179,20 @@ async def chat_request(
 
     sources: list[SourceItem] = []
     expanded_context = await expand_with_neighbors(selected_chunks, session)
+    # Build text→metadata map from selected chunks so neighbors also get doc_name
+    text_to_meta: dict[str, dict] = {}
+    for item in selected_chunks:
+        _meta = item["metadata"]
+        _doc_id = _meta.get("doc_id")
+        text_to_meta[item["text"]] = {
+            "doc_name": _meta.get("doc_name") or doc_name_map.get(_doc_id),
+            "page": _meta.get("page"),
+        }
+
     filtered_context: list[str] = list(expanded_context)
-    context_metadata: list[dict[str, Any]] = [{} for _ in expanded_context]
+    context_metadata: list[dict[str, Any]] = [
+        text_to_meta.get(t, {}) for t in filtered_context
+    ]
     for item in selected_chunks:
         chunk_text = item["text"]
         meta = item["metadata"]

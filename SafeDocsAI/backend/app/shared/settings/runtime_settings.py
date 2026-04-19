@@ -16,6 +16,10 @@ class RuntimeSettingsService:
         "enable_condense_query": True,
         "contextual_embedding_enabled": False,
         "contextual_embedding_model": "gemma3:4b",
+        "chat_model_num_ctx": 20000,
+        "contextual_embedding_num_ctx": 8192,
+        "reranker_enabled": False,
+        "reranker_model": "gemma4:e4b",
     }
 
     @classmethod
@@ -86,6 +90,10 @@ class RuntimeSettingsService:
         merged["contextual_embedding_model"] = str(
             merged.get("contextual_embedding_model") or cls.DEFAULTS["contextual_embedding_model"]
         ).strip()
+        merged["chat_model_num_ctx"] = cls._normalize_num_ctx(merged.get("chat_model_num_ctx"), 20000)
+        merged["contextual_embedding_num_ctx"] = cls._normalize_num_ctx(merged.get("contextual_embedding_num_ctx"), 8192)
+        merged["reranker_enabled"] = cls._normalize_bool(merged.get("reranker_enabled"), default=False)
+        merged["reranker_model"] = str(merged.get("reranker_model") or cls.DEFAULTS["reranker_model"]).strip()
         if not merged["chat_model"]:
             merged["chat_model"] = cls.DEFAULTS["chat_model"]
         if not merged["embedding_model"]:
@@ -151,6 +159,15 @@ class RuntimeSettingsService:
             if model and model not in cls.model_catalog()["available_chat_models"]:
                 raise ValueError(f"Unsupported contextual embedding model: {model}")
             current["contextual_embedding_model"] = model or cls.DEFAULTS["contextual_embedding_model"]
+        if "chat_model_num_ctx" in patch:
+            current["chat_model_num_ctx"] = cls._normalize_num_ctx(patch["chat_model_num_ctx"], 20000)
+        if "contextual_embedding_num_ctx" in patch:
+            current["contextual_embedding_num_ctx"] = cls._normalize_num_ctx(patch["contextual_embedding_num_ctx"], 8192)
+        if "reranker_enabled" in patch:
+            current["reranker_enabled"] = cls._normalize_bool(patch["reranker_enabled"], default=False)
+        if "reranker_model" in patch:
+            model = str(patch["reranker_model"] or "").strip()
+            current["reranker_model"] = model or cls.DEFAULTS["reranker_model"]
 
         path = cls._settings_path()
         path.write_text(
@@ -173,6 +190,14 @@ class RuntimeSettingsService:
         except (TypeError, ValueError):
             return 20
         return max(1, min(number, 50))
+
+    @staticmethod
+    def _normalize_num_ctx(value: Any, default: int) -> int:
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            return default
+        return max(2048, min(number, 262144))
 
     @staticmethod
     def _normalize_domain_profile(value: Any) -> str:

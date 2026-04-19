@@ -226,13 +226,15 @@ class DocumentService:
         with open(file_path, "rb") as f:
             raw_content = f.read()
 
-        for encoding in ("utf-8-sig", "utf-8", "cp1251", "windows-1251"):
+        for encoding in ("utf-8-sig", "utf-8"):
             try:
                 return raw_content.decode(encoding)
             except UnicodeDecodeError:
                 continue
 
-        return raw_content.decode("utf-8", errors="ignore")
+        raise ValueError(
+            "Файл не является валидным UTF-8. Конвертируйте файл в кодировку UTF-8 перед загрузкой."
+        )
 
     @classmethod
     def _extract_blocks_from_txt(cls, file_path: str) -> List[TextBlock]:
@@ -240,19 +242,39 @@ class DocumentService:
         content = cls._read_txt_content(file_path)
 
         paragraphs = re.split(r"\n\s*\n", content)
-        blocks: List[TextBlock] = []
 
-        for i, para in enumerate(paragraphs):
-            text = para.strip()
-            if text:
-                blocks.append(
-                    TextBlock(
-                        text=text,
-                        page=1,
-                        order=i,
-                        source="txt",
-                    )
+        # Merge consecutive short paragraphs (<400 chars) with the next one
+        merged: List[str] = []
+        buffer = ""
+        for para in paragraphs:
+            para = para.strip()
+            if not para:
+                continue
+            if buffer:
+                buffer = buffer + "\n\n" + para
+                if len(buffer) >= 400:
+                    merged.append(buffer)
+                    buffer = ""
+            elif len(para) < 400:
+                buffer = para
+            else:
+                merged.append(para)
+        if buffer:
+            if merged:
+                merged[-1] = merged[-1] + "\n\n" + buffer
+            else:
+                merged.append(buffer)
+
+        blocks: List[TextBlock] = []
+        for i, text in enumerate(merged):
+            blocks.append(
+                TextBlock(
+                    text=text,
+                    page=1,
+                    order=i,
+                    source="txt",
                 )
+            )
 
         return blocks
 

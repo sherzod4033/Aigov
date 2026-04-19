@@ -18,21 +18,22 @@ def format_context_for_llm(
     for i, text in enumerate(context):
         meta = (context_metadata[i] if context_metadata and i < len(context_metadata) else {}) or {}
 
-        # Split: "{llm_ctx} [{doc_name | section | стр. N}] {original_text}"
+        # Strip LLM metadata prefix: "{llm_ctx} [{doc_name | section | стр. N}] {original_text}"
         bracket_match = re.search(r'\[([^\]]+)\]\s*', text)
         if bracket_match:
-            llm_ctx = text[:bracket_match.start()].strip()
             original_text = text[bracket_match.end():].strip()
         else:
-            llm_ctx = ""
             original_text = text.strip()
 
-        chunk_parts: list[str] = []
-        if llm_ctx:
-            chunk_parts.append(f"### [Метаданные системы]: {llm_ctx}")
-        chunk_parts.append(f"### [Текст документа]: {original_text}")
-        parts.append("\n".join(chunk_parts))
-    return "\n\n---\n\n".join(parts)
+        doc_name = meta.get("doc_name") or ""
+        chunk_xml = (
+            f"<chunk>\n"
+            f"<file_name>{doc_name}</file_name>\n"
+            f"<original_text>\n{original_text}\n</original_text>\n"
+            f"</chunk>"
+        )
+        parts.append(chunk_xml)
+    return "\n\n".join(parts)
 
 
 class GenerationService:
@@ -98,6 +99,10 @@ class GenerationService:
         no_data_answer: str | None = None,
         context_metadata: List[Dict[str, Any]] | None = None,
     ) -> str:
+        from app.services.runtime_settings_service import RuntimeSettingsService
+        runtime_settings = RuntimeSettingsService.get_settings()
+        chat_num_ctx = runtime_settings.get("chat_model_num_ctx", 20000)
+
         resolved_model = self.model_manager.resolve_chat_model(model)
         context_str = format_context_for_llm(context, context_metadata)
         no_data_answer = no_data_answer or (
@@ -115,30 +120,26 @@ class GenerationService:
                 role = "User" if msg["role"] == "user" else "AI"
                 history_str += f"{role}: {msg['content']}\n"
 
-        if language == "tj":
-            prompt = (
-                f"Шумо {assistant_name} ҳастед. Ба савол дар асоси контекст ва таърих ҷавоб диҳед.\n"
-                f"Қоидаҳо:\n1) {answer_rules}\n"
-                f"2) Шумо метавонед услуби шарҳро мутобиқ созед, аммо далелҳо наофаред.\n"
-                f'3) Агар контекст ҷавоб надошта бошад, айнан бинависед: "{no_data_answer}".\n'
-                f"4) Таърихи суҳбатро риоя кунед.\n"
-                f"5) Агар шумо маълумотро танҳо барои як қисми савол ёфтед, ҷавоби қисмӣ диҳед: он чиро ёфтед нависед ва мушаххас қайд кунед, ки кадом маълумот дар контекст мавҷуд нест.\n\n"
-                f"Таърих:\n{history_str or 'Таърих нест'}\n\nКонтекст:\n{context_str}\n\nСавол: {query}\nҶавоб:"
-            )
-        else:
-            prompt = (
-                f"Вы — {assistant_name}. Отвечайте на вопрос пользователя на основе предоставленного контекста и истории.\n"
-                f"Правила:\n1) {answer_rules}\n"
-                f"2) Адаптивный стиль: вы можете менять стиль объяснения по просьбе, но не выдумывайте факты.\n"
-                f'3) Если контекст не содержит ответа на вопрос, ответьте точно: "{no_data_answer}".\n'
-                f"4) Поддерживайте поток беседы, используя историю.\n"
-                f"5) Если вы нашли информацию только для одной части вопроса пользователя, а для другой части информации в тексте нет, дайте частичный ответ. Напишите то, что нашли, и прямо укажите, какой информации не хватает в предоставленном контексте.\n\n"
-                f"История:\n{history_str or 'Нет истории'}\n\nКонтекст:\n{context_str}\n\nВопрос: {query}\nОтвет:"
-            )
+        prompt = (
+            f"You are {assistant_name}, a document-based question answering assistant.\n"
+            f"Answer the user's question using ONLY the provided context and conversation history.\n\n"
+            f"Rules:\n"
+            f"1) {answer_rules}\n"
+            f"2) Find the answer ONLY inside the <original_text> tags. Do not use any other part of the context as a source of facts.\n"
+            f"3) For every fact or figure you state, you MUST cite the source file name in parentheses. The file name is located strictly between the <file_name> and </file_name> tags. Never use any other words or phrases from the context as a citation. Example: (payom2005.txt).\n"
+            f"4) Reply in the same language the user used (Russian, Tajik, or other). Do not switch languages.\n"
+            f"5) You may adapt your explanation style on request, but never invent facts.\n"
+            f'6) If the context does not contain the answer, reply exactly: "{no_data_answer}".\n'
+            f"7) Maintain conversation flow using the history.\n"
+            f"8) If you found information for only part of the question, give a partial answer — state what you found and clearly note what is missing from the context.\n\n"
+            f"History:\n{history_str or 'No history'}\n\nContext:\n{context_str}\n\nQuestion: {query}\nAnswer:"
+        )
+
         try:
             draft_answer = await self.model_manager.chat(
                 model=resolved_model,
                 messages=[{"role": "user", "content": prompt}],
+                num_ctx=chat_num_ctx,
             )
         except ExternalServiceError as exc:
             if resolved_model != DEFAULT_CHAT_MODEL:
@@ -146,6 +147,7 @@ class GenerationService:
                     draft_answer = await self.model_manager.chat(
                         model=DEFAULT_CHAT_MODEL,
                         messages=[{"role": "user", "content": prompt}],
+                        num_ctx=chat_num_ctx,
                     )
                 except ExternalServiceError as fallback_exc:
                     raise ExternalServiceError(

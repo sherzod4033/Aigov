@@ -7,5 +7,9 @@
   "enable_condense_query": false,
   "contextual_embedding_enabled": true,
   "contextual_embedding_model": "gemma4:e4b",
+  "chat_model_num_ctx": 4096,
+  "contextual_embedding_num_ctx": 8192,
+  "reranker_enabled": false,
+  "reranker_model": "gemma4:e4b",
   "model": "gemma4:26b"
 }
