@@ -63,6 +63,9 @@ const normalizeMessage = (message) => {
         normalized.pending = true;
         normalized.requestId = typeof message.requestId === 'string' ? message.requestId : createRequestId();
         normalized.createdAt = typeof message.createdAt === 'number' ? message.createdAt : Date.now();
+        if (message.streaming === true) {
+            normalized.streaming = true;
+        }
     }
 
     if (Array.isArray(message.sources)) {
@@ -107,6 +110,17 @@ const replacePendingMessageByRequestId = (messages, requestId, nextMessage) => {
     }
 
     return updated;
+};
+
+const updatePendingMessageByRequestId = (messages, requestId, updater) => {
+    if (!requestId) return messages;
+
+    return messages.map((message) => {
+        if (message.pending === true && message.requestId === requestId) {
+            return updater(message);
+        }
+        return message;
+    });
 };
 
 const removePendingMessageByRequestId = (messages, requestId) => {
@@ -350,13 +364,24 @@ const ChatPage = ({ notebookId, mode = 'page' }) => {
         });
         reset();
 
+        let streamedAnswer = '';
         try {
-            const response = await chatService.sendMessage(cleanMessage, effectiveNotebookId);
+            const finalPayload = await chatService.streamMessage(cleanMessage, effectiveNotebookId, {
+                onToken: (token) => {
+                    if (!token) return;
+                    streamedAnswer += token;
+                    setMessages((prev) => updatePendingMessageByRequestId(prev, requestId, (message) => ({
+                        ...message,
+                        content: streamedAnswer,
+                        streaming: true,
+                    })));
+                },
+            });
             const botMessage = {
                 role: 'assistant',
-                content: response.data.answer,
-                sources: response.data.sources,
-                logId: response.data.log_id,
+                content: finalPayload?.answer || streamedAnswer,
+                sources: finalPayload?.sources || [],
+                logId: finalPayload?.log_id,
             };
 
             const stored = loadMessagesFromStorage(chatStorageKey, initialAssistantMessage, t('chat.interrupted'));
@@ -379,6 +404,19 @@ const ChatPage = ({ notebookId, mode = 'page' }) => {
             }
             // Check if it's an authentication error
             const isAuthError = error.response?.status === 403 || error.response?.status === 401;
+            if (streamedAnswer.trim() && !isAuthError) {
+                const partialMessage = {
+                    role: 'assistant',
+                    content: streamedAnswer,
+                    sources: error.response?.data?.sources || [],
+                    logId: error.response?.data?.log_id,
+                };
+                const stored = loadMessagesFromStorage(chatStorageKey, initialAssistantMessage, t('chat.interrupted'));
+                const storageUpdated = replacePendingMessageByRequestId(stored, requestId, partialMessage);
+                persistMessagesToStorage(chatStorageKey, storageUpdated, initialAssistantMessage);
+                setMessages((prev) => replacePendingMessageByRequestId(prev, requestId, partialMessage));
+                return;
+            }
             const errorContent = isAuthError
                 ? t('chat.authExpired')
                 : t('chat.requestFailed');
@@ -528,7 +566,7 @@ const ChatPage = ({ notebookId, mode = 'page' }) => {
                                             msg.role === 'user'
                                                 ? 'rounded-tr-md bg-[#1f3a60] text-white'
                                                 : 'rounded-tl-md border border-slate-200 bg-[#f2f4f7] text-slate-700',
-                                            msg.pending === true && 'animate-pulse',
+                                            msg.pending === true && msg.streaming !== true && 'animate-pulse',
                                         )}
                                     >
                                         {msg.role === 'assistant'

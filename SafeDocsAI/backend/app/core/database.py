@@ -1,4 +1,7 @@
 import logging
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -15,6 +18,10 @@ engine = create_async_engine(
     future=True,
     pool_pre_ping=True,  # Verify connections before using
     pool_recycle=300,  # Recycle connections after 5 minutes
+)
+
+async_session_factory = sessionmaker(
+    engine, class_=AsyncSession, expire_on_commit=False
 )
 
 
@@ -158,10 +165,10 @@ async def init_db():
         raise
 
 
-async def get_session() -> AsyncSession:
+@asynccontextmanager
+async def session_context() -> AsyncIterator[AsyncSession]:
     """Get database session with automatic cleanup."""
-    async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with async_session() as session:
+    async with async_session_factory() as session:
         try:
             yield session
         except Exception:
@@ -169,6 +176,12 @@ async def get_session() -> AsyncSession:
             raise
         finally:
             await session.close()
+
+
+async def get_session() -> AsyncIterator[AsyncSession]:
+    """FastAPI dependency for request-scoped database sessions."""
+    async with session_context() as session:
+        yield session
 
 
 async def check_database_connection() -> bool:

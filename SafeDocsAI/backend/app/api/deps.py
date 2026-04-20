@@ -1,12 +1,10 @@
-from typing import Generator, Optional
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
 from pydantic import ValidationError
 from sqlmodel.ext.asyncio.session import AsyncSession
-from app.core import security
 from app.shared.settings import settings
-from app.core.database import get_session
+from app.core.database import get_session, session_context
 from app.shared.models import User
 from sqlmodel import select
 
@@ -15,9 +13,7 @@ oauth2_scheme = OAuth2PasswordBearer(
 )
 
 
-async def get_current_user(
-    session: AsyncSession = Depends(get_session), token: str = Depends(oauth2_scheme)
-) -> User:
+async def _get_current_user_from_session(session: AsyncSession, token: str) -> User:
     try:
         payload = jwt.decode(
             token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
@@ -40,6 +36,19 @@ async def get_current_user(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user
+
+
+async def get_current_user(
+    session: AsyncSession = Depends(get_session), token: str = Depends(oauth2_scheme)
+) -> User:
+    return await _get_current_user_from_session(session, token)
+
+
+async def get_current_user_short_lived(
+    token: str = Depends(oauth2_scheme),
+) -> User:
+    async with session_context() as session:
+        return await _get_current_user_from_session(session, token)
 
 
 async def get_current_active_superuser(

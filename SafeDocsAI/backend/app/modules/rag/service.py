@@ -58,6 +58,10 @@ class RAGService:
     async def generate_answer(self, *args, **kwargs):
         return await self._generation.generate_answer(*args, **kwargs)
 
+    async def stream_answer(self, *args, **kwargs):
+        async for token in self._generation.stream_answer(*args, **kwargs):
+            yield token
+
 
 __all__ = [
     "DEFAULT_CHAT_MODEL",

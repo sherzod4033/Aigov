@@ -195,9 +195,9 @@ class DocumentModuleService:
         _ctx_model = _rt.get("contextual_embedding_model", "")
         detected_language = doc.language or "ru"
         doc_intro = " ".join(cr.text for cr in chunk_results[:3])[:1500] if _ctx_enabled else ""
-        docs_text: list[str] = []
-        ids: list[str] = []
-        metadatas: list[dict[str, Any]] = []
+
+        # Сохраняем все чанки в БД сразу, получаем их id
+        chunks: list[Chunk] = []
         for cr in chunk_results:
             chunk = Chunk(
                 text=cr.text,
@@ -207,30 +207,64 @@ class DocumentModuleService:
                 doc_id=doc.id,
             )
             session.add(chunk)
-            await session.flush()
-            base_text = _build_embedding_text(chunk.text, doc.name, chunk.page, chunk.section)
-            if _ctx_enabled and _ctx_model:
-                llm_ctx = await _generate_llm_context(
-                    chunk.text, doc.name, detected_language, _ctx_model,
-                    doc_intro=doc_intro, section_path=cr.section_path or [],
-                )
-                embedding_text = f"{llm_ctx} {base_text}" if llm_ctx else base_text
-            else:
-                embedding_text = base_text
-            docs_text.append(embedding_text)
-            ids.append(str(chunk.id))
-            metadata = {
-                "doc_id": doc.id,
-                "doc_name": doc.name,
+            chunks.append(chunk)
+        await session.flush()
+
+        # Извлекаем все нужные данные из ORM-объектов ДО commit,
+        # чтобы не держать соединение открытым во время LLM-фазы
+        doc_id = doc.id
+        doc_name = doc.name
+        doc_notebook_id = doc.notebook_id
+        chunk_data = [
+            {
+                "id": str(chunk.id),
+                "text": chunk.text,
                 "page": chunk.page,
+                "section": chunk.section,
+                "section_path": cr.section_path or [],
                 "chunk_index": cr.chunk_index,
             }
-            if chunk.section:
-                metadata["section"] = chunk.section
-            if doc.notebook_id is not None:
-                metadata["notebook_id"] = doc.notebook_id
-            metadatas.append(metadata)
+            for chunk, cr in zip(chunks, chunk_results)
+        ]
+
+        # Коммит освобождает DB-соединение обратно в пул
         await session.commit()
+
+        # Параллельная генерация LLM-контекста (до 5 одновременно)
+        # DB-соединение НЕ удерживается во время LLM-вызовов
+        _llm_sem = asyncio.Semaphore(5)
+
+        async def _process_chunk(cd: dict) -> str:
+            base_text = _build_embedding_text(cd["text"], doc_name, cd["page"], cd["section"])
+            if _ctx_enabled and _ctx_model:
+                async with _llm_sem:
+                    llm_ctx = await _generate_llm_context(
+                        cd["text"], doc_name, detected_language, _ctx_model,
+                        doc_intro=doc_intro, section_path=cd["section_path"],
+                    )
+                return f"{llm_ctx} {base_text}" if llm_ctx else base_text
+            return base_text
+
+        embedding_texts = await asyncio.gather(
+            *[_process_chunk(cd) for cd in chunk_data]
+        )
+
+        ids: list[str] = [cd["id"] for cd in chunk_data]
+        metadatas: list[dict[str, Any]] = []
+        for cd, emb_text in zip(chunk_data, embedding_texts):
+            metadata = {
+                "doc_id": doc_id,
+                "doc_name": doc_name,
+                "page": cd["page"],
+                "chunk_index": cd["chunk_index"],
+            }
+            if cd["section"]:
+                metadata["section"] = cd["section"]
+            if doc_notebook_id is not None:
+                metadata["notebook_id"] = doc_notebook_id
+            metadatas.append(metadata)
+
+        docs_text = list(embedding_texts)
         try:
             rag_service.add_documents(docs_text, metadatas, ids)
             doc.status = "indexed"
@@ -238,13 +272,12 @@ class DocumentModuleService:
             await session.commit()
             await session.refresh(doc)
         except Exception as exc:
-            await session.refresh(doc)
             doc.status = "error"
             session.add(doc)
             await session.commit()
             logger.warning(
                 "Document %s saved but indexing failed: %s",
-                doc.id,
+                doc_id,
                 exc,
             )
             await session.refresh(doc)

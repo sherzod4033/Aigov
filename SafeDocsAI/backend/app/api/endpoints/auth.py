@@ -29,6 +29,17 @@ class RegisterResponse(BaseModel):
     created_at: datetime
 
 
+def _create_login_response(user: User) -> dict[str, str]:
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = security.create_access_token(
+        data={"sub": user.username}, expires_delta=access_token_expires
+    )
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+    }
+
+
 @router.post("/login/access-token", response_model=dict)
 async def login_access_token(
     session: AsyncSession = Depends(deps.get_session),
@@ -49,14 +60,7 @@ async def login_access_token(
     if not user or not security.verify_password(form_data.password, user.password_hash):
         raise HTTPException(status_code=400, detail="Incorrect email or password")
 
-    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = security.create_access_token(
-        data={"sub": user.username}, expires_delta=access_token_expires
-    )
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-    }
+    return _create_login_response(user)
 
 
 @router.post("/login", response_model=dict)
@@ -71,6 +75,16 @@ async def login_alias(
     return await login_access_token(
         session=session, form_data=form_data, request=request
     )
+
+
+@router.post("/refresh", response_model=dict)
+async def refresh_access_token(
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """
+    Extend an active session without forcing the user back to the login screen.
+    """
+    return _create_login_response(current_user)
 
 
 @router.post("/register", response_model=RegisterResponse)

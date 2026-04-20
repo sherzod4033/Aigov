@@ -1,5 +1,5 @@
 import re
-from typing import Any, Dict, List
+from typing import Any, AsyncIterator, Dict, List
 
 from app.core.exceptions import ExternalServiceError
 from app.modules.rag.constants import DEFAULT_CHAT_MODEL
@@ -54,6 +54,49 @@ class GenerationService:
             return no_data_answer
         return " ".join(sentences[:2]).strip()
 
+    @staticmethod
+    def _build_answer_prompt(
+        query: str,
+        context: List[str],
+        chat_history: List[Dict[str, str]] | None = None,
+        language: str = "ru",
+        assistant_name: str = "SafeDocsAI",
+        answer_rules: str | None = None,
+        no_data_answer: str | None = None,
+        context_metadata: List[Dict[str, Any]] | None = None,
+    ) -> tuple[str, str]:
+        context_str = format_context_for_llm(context, context_metadata)
+        no_data_answer = no_data_answer or (
+            "Маълумот дар манбаъҳои интихобшуда мавҷуд нест / Ответ не найден в выбранных источниках"
+            if language == "tj"
+            else "Ответ не найден в выбранных источниках / Маълумот дар манбаъҳои интихобшуда мавҷуд нест"
+        )
+        answer_rules = answer_rules or (
+            "Use ONLY factual information from the provided context. "
+            "If the context does not contain the answer to the core question, return the exact no-data message."
+        )
+        history_str = ""
+        if chat_history:
+            for msg in chat_history[-3:]:
+                role = "User" if msg["role"] == "user" else "AI"
+                history_str += f"{role}: {msg['content']}\n"
+
+        prompt = (
+            f"You are {assistant_name}, a document-based question answering assistant.\n"
+            f"Answer the user's question using ONLY the provided context and conversation history.\n\n"
+            f"Rules:\n"
+            f"1) {answer_rules}\n"
+            f"2) Find the answer ONLY inside the <original_text> tags. Do not use any other part of the context as a source of facts.\n"
+            f"3) For every fact or figure you state, you MUST cite the source file name in parentheses. The file name is located strictly between the <file_name> and </file_name> tags. Never use any other words or phrases from the context as a citation. Example: (payom2005.txt).\n"
+            f"4) Reply in the same language the user used (Russian, Tajik, or other). Do not switch languages.\n"
+            f"5) You may adapt your explanation style on request, but never invent facts.\n"
+            f'6) If the context does not contain the answer, reply exactly: "{no_data_answer}".\n'
+            f"7) Maintain conversation flow using the history.\n"
+            f"8) If you found information for only part of the question, give a partial answer — state what you found and clearly note what is missing from the context.\n\n"
+            f"History:\n{history_str or 'No history'}\n\nContext:\n{context_str}\n\nQuestion: {query}\nAnswer:"
+        )
+        return prompt, no_data_answer
+
     async def condense_query(
         self,
         query: str,
@@ -104,35 +147,15 @@ class GenerationService:
         chat_num_ctx = runtime_settings.get("chat_model_num_ctx", 20000)
 
         resolved_model = self.model_manager.resolve_chat_model(model)
-        context_str = format_context_for_llm(context, context_metadata)
-        no_data_answer = no_data_answer or (
-            "Маълумот дар манбаъҳои интихобшуда мавҷуд нест / Ответ не найден в выбранных источниках"
-            if language == "tj"
-            else "Ответ не найден в выбранных источниках / Маълумот дар манбаъҳои интихобшуда мавҷуд нест"
-        )
-        answer_rules = answer_rules or (
-            "Use ONLY factual information from the provided context. "
-            "If the context does not contain the answer to the core question, return the exact no-data message."
-        )
-        history_str = ""
-        if chat_history:
-            for msg in chat_history[-3:]:
-                role = "User" if msg["role"] == "user" else "AI"
-                history_str += f"{role}: {msg['content']}\n"
-
-        prompt = (
-            f"You are {assistant_name}, a document-based question answering assistant.\n"
-            f"Answer the user's question using ONLY the provided context and conversation history.\n\n"
-            f"Rules:\n"
-            f"1) {answer_rules}\n"
-            f"2) Find the answer ONLY inside the <original_text> tags. Do not use any other part of the context as a source of facts.\n"
-            f"3) For every fact or figure you state, you MUST cite the source file name in parentheses. The file name is located strictly between the <file_name> and </file_name> tags. Never use any other words or phrases from the context as a citation. Example: (payom2005.txt).\n"
-            f"4) Reply in the same language the user used (Russian, Tajik, or other). Do not switch languages.\n"
-            f"5) You may adapt your explanation style on request, but never invent facts.\n"
-            f'6) If the context does not contain the answer, reply exactly: "{no_data_answer}".\n'
-            f"7) Maintain conversation flow using the history.\n"
-            f"8) If you found information for only part of the question, give a partial answer — state what you found and clearly note what is missing from the context.\n\n"
-            f"History:\n{history_str or 'No history'}\n\nContext:\n{context_str}\n\nQuestion: {query}\nAnswer:"
+        prompt, no_data_answer = self._build_answer_prompt(
+            query=query,
+            context=context,
+            chat_history=chat_history,
+            language=language,
+            assistant_name=assistant_name,
+            answer_rules=answer_rules,
+            no_data_answer=no_data_answer,
+            context_metadata=context_metadata,
         )
 
         try:
@@ -168,3 +191,61 @@ class GenerationService:
         if not answer:
             return self._fallback_from_context(context, no_data_answer)
         return answer
+
+    async def stream_answer(
+        self,
+        query: str,
+        context: List[str],
+        chat_history: List[Dict[str, str]] | None = None,
+        language: str = "ru",
+        model: str = DEFAULT_CHAT_MODEL,
+        assistant_name: str = "SafeDocsAI",
+        answer_rules: str | None = None,
+        no_data_answer: str | None = None,
+        context_metadata: List[Dict[str, Any]] | None = None,
+    ) -> AsyncIterator[str]:
+        from app.services.runtime_settings_service import RuntimeSettingsService
+
+        runtime_settings = RuntimeSettingsService.get_settings()
+        chat_num_ctx = runtime_settings.get("chat_model_num_ctx", 20000)
+        resolved_model = self.model_manager.resolve_chat_model(model)
+        prompt, _ = self._build_answer_prompt(
+            query=query,
+            context=context,
+            chat_history=chat_history,
+            language=language,
+            assistant_name=assistant_name,
+            answer_rules=answer_rules,
+            no_data_answer=no_data_answer,
+            context_metadata=context_metadata,
+        )
+
+        try:
+            async for token in self.model_manager.chat_stream(
+                model=resolved_model,
+                messages=[{"role": "user", "content": prompt}],
+                num_ctx=chat_num_ctx,
+            ):
+                yield token
+        except ExternalServiceError as exc:
+            if resolved_model == DEFAULT_CHAT_MODEL:
+                raise ExternalServiceError(
+                    "Chat provider is unavailable",
+                    service=exc.service,
+                    status_code=exc.status_code,
+                    cause=exc,
+                ) from exc
+            try:
+                async for token in self.model_manager.chat_stream(
+                    model=DEFAULT_CHAT_MODEL,
+                    messages=[{"role": "user", "content": prompt}],
+                    num_ctx=chat_num_ctx,
+                ):
+                    yield token
+            except ExternalServiceError as fallback_exc:
+                raise ExternalServiceError(
+                    "Chat provider is unavailable",
+                    service=fallback_exc.service,
+                    status_code=fallback_exc.status_code,
+                    cause=fallback_exc,
+                ) from fallback_exc

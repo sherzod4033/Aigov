@@ -1,5 +1,5 @@
 import json
-from typing import Any, Sequence
+from typing import Any, AsyncIterator, Sequence
 import urllib.request
 from urllib.parse import urljoin
 
@@ -136,6 +136,64 @@ class ModelManager:
 
         content = response["message"]["content"].strip()
         return content
+
+    async def chat_stream(
+        self,
+        messages: list[dict[str, str]],
+        model: str | None = None,
+        max_tokens: int | None = None,
+        think: bool = False,
+        num_ctx: int | None = None,
+    ) -> AsyncIterator[str]:
+        resolved_model = self.resolve_chat_model(model)
+
+        try:
+            kwargs: dict = dict(
+                model=resolved_model,
+                messages=messages,
+                think=think,
+                keep_alive=-1,
+                stream=True,
+            )
+            options: dict = {"num_ctx": num_ctx if num_ctx is not None else 12288}
+            if max_tokens is not None:
+                options["num_predict"] = max_tokens
+            kwargs["options"] = options
+            response = await self._ollama_async_client.chat(**kwargs)
+        except Exception as exc:
+            raise self._wrap_provider_error("Ollama", exc) from exc
+
+        if hasattr(response, "__aiter__"):
+            try:
+                async for chunk in response:
+                    if isinstance(chunk, dict):
+                        message = chunk.get("message", {})
+                        content = message.get("content") or chunk.get("response", "")
+                    else:
+                        message = getattr(chunk, "message", None)
+                        if isinstance(message, dict):
+                            content = message.get("content", "")
+                        else:
+                            content = getattr(message, "content", "") if message else ""
+                        content = content or getattr(chunk, "response", "")
+                    if content:
+                        yield content
+                return
+            except Exception as exc:
+                raise self._wrap_provider_error("Ollama", exc) from exc
+
+        if isinstance(response, dict):
+            message = response.get("message", {})
+            content = (message.get("content") or response.get("response", "")).strip()
+        else:
+            message = getattr(response, "message", None)
+            if isinstance(message, dict):
+                content = message.get("content", "")
+            else:
+                content = getattr(message, "content", "") if message else ""
+            content = (content or getattr(response, "response", "")).strip()
+        if content:
+            yield content
 
     def embed(
         self, texts: Sequence[str], model: str | None = None

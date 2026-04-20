@@ -3,12 +3,14 @@ import logging
 import math
 import re
 from collections import Counter
+from dataclasses import dataclass
 from time import perf_counter, time as time_now
-from typing import Any
+from typing import Any, AsyncIterator
 
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.core.database import session_context
 from app.models.models import Chunk, Document, Log, Notebook, User
 from app.modules.chat.schemas import (
     ChatRequest,
@@ -33,6 +35,23 @@ RRF_K = 60
 _RETRIEVAL_CACHE: dict[str, tuple[float, dict[str, list[dict[str, Any]]]]] = {}
 _RETRIEVAL_CACHE_TTL = 300  # 5 minutes
 _RETRIEVAL_CACHE_MAX_SIZE = 200
+
+
+@dataclass
+class StreamChatPreparation:
+    normalized_question: str
+    language: str
+    model: str
+    assistant_name: str
+    answer_rules: str | None
+    no_data_answer: str
+    chat_history: list[dict[str, str]]
+    context: list[str]
+    context_metadata: list[dict[str, Any]]
+    sources: list[SourceItem]
+    notebook_id: int | None
+    domain_profile: str
+    immediate_answer: str | None = None
 
 
 def _retrieval_cache_key(notebook_id: int | None, query: str) -> str:
@@ -65,6 +84,42 @@ def safe_float(value: Any) -> float | None:
     if math.isnan(result) or math.isinf(result):
         return None
     return result
+
+
+def stream_event(event: str, payload: dict[str, Any]) -> str:
+    return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+async def persist_chat_log_short_lived(
+    *,
+    question: str,
+    answer: str,
+    sources: list[SourceItem],
+    started: float,
+    user_id: int,
+    notebook_id: int | None,
+    domain_profile: str,
+) -> tuple[int | None, str | None]:
+    try:
+        async with session_context() as session:
+            log_entry = Log(
+                question=question,
+                answer=answer,
+                sources=json.dumps(
+                    [item.model_dump() for item in sources], ensure_ascii=False
+                ),
+                time_ms=int((perf_counter() - started) * 1000),
+                user_id=user_id,
+                notebook_id=notebook_id,
+                domain_profile=domain_profile,
+            )
+            session.add(log_entry)
+            await session.commit()
+            await session.refresh(log_entry)
+            return log_entry.id, None
+    except Exception:
+        logger.exception("Failed to persist streaming chat log")
+        return None, "log_persistence_failed"
 
 
 def is_no_data_answer(answer: str) -> bool:
@@ -1243,3 +1298,288 @@ async def chat_request(
     await session.commit()
     await session.refresh(log_entry)
     return ChatResponse(answer=answer, sources=sources, log_id=log_entry.id)
+
+
+async def chat_request_stream(
+    chat_request: ChatRequest,
+    current_user: User,
+) -> AsyncIterator[str]:
+    started = perf_counter()
+    rag_service = RAGService()
+    normalized_question = rag_service.normalize_query(chat_request.question)
+    language = rag_service.detect_language(normalized_question)
+    runtime_settings = RuntimeSettingsService.get_settings()
+    retrieval_top_k, top_k = resolve_retrieval_limits(runtime_settings)
+    enable_condense_query = bool(runtime_settings.get("enable_condense_query", True))
+    model = runtime_settings.get("chat_model") or runtime_settings.get(
+        "model", DEFAULT_CHAT_MODEL
+    )
+    user_id = current_user.id
+    if user_id is None:
+        yield stream_event(
+            "error",
+            {"detail": "Could not validate credentials", "status": 403},
+        )
+        return
+
+    preparation: StreamChatPreparation
+    try:
+        async with session_context() as session:
+            notebook: Notebook | None = None
+            if chat_request.notebook_id is not None:
+                notebook = await session.get(Notebook, chat_request.notebook_id)
+            if notebook is None:
+                notebook_result = await session.exec(
+                    select(Notebook).order_by(Notebook.created_at.asc()).limit(1)
+                )
+                notebook = notebook_result.first()
+
+            notebook_id = notebook.id if notebook else None
+            profile = resolve_profile(
+                notebook=notebook, requested=chat_request.domain_profile
+            )
+            no_data_answer = profile.no_data_answer(language)
+            base_preparation = {
+                "normalized_question": normalized_question,
+                "language": language,
+                "model": model,
+                "assistant_name": profile.assistant_name,
+                "answer_rules": profile.answer_rules(language),
+                "no_data_answer": no_data_answer,
+                "notebook_id": notebook_id,
+                "domain_profile": profile.name,
+            }
+
+            if is_greeting(chat_request.question):
+                preparation = StreamChatPreparation(
+                    **base_preparation,
+                    chat_history=[],
+                    context=[],
+                    context_metadata=[],
+                    sources=[],
+                    immediate_answer=profile.greeting(language),
+                )
+            elif rag_service.is_prompt_injection_attempt(normalized_question):
+                preparation = StreamChatPreparation(
+                    **base_preparation,
+                    chat_history=[],
+                    context=[],
+                    context_metadata=[],
+                    sources=[],
+                    immediate_answer=profile.prompt_injection_message(language),
+                )
+            else:
+                yield stream_event("status", {"stage": "retrieval"})
+
+                history_result = await session.exec(
+                    select(Log)
+                    .where(Log.user_id == user_id)
+                    .where(Log.notebook_id == notebook_id)
+                    .order_by(Log.created_at.desc())
+                    .limit(5)
+                )
+                history_logs = sorted(history_result.all(), key=lambda x: x.created_at)
+                chat_history = []
+                for log in history_logs:
+                    chat_history.append({"role": "user", "content": log.question})
+                    chat_history.append({"role": "assistant", "content": log.answer})
+
+                article_ref = rag_service._detect_article_reference(
+                    normalized_question
+                )
+                if article_ref or not enable_condense_query:
+                    search_query = normalized_question
+                else:
+                    search_query = await rag_service.condense_query(
+                        normalized_question, chat_history, model=model
+                    )
+
+                allowed_doc_ids: set[int] | None = None
+                if notebook_id is not None:
+                    notebook_docs_result = await session.exec(
+                        select(Document.id).where(Document.notebook_id == notebook_id)
+                    )
+                    allowed_doc_ids = {
+                        doc_id
+                        for doc_id in notebook_docs_result.all()
+                        if doc_id is not None
+                    }
+
+                selected_chunks = await run_retrieval(
+                    rag_service=rag_service,
+                    session=session,
+                    profile=profile,
+                    language=language,
+                    search_query=search_query,
+                    original_query=normalized_question,
+                    allowed_doc_ids=allowed_doc_ids,
+                    retrieval_top_k=retrieval_top_k,
+                    final_top_k=top_k,
+                    notebook_id=notebook_id,
+                )
+
+                if not selected_chunks:
+                    preparation = StreamChatPreparation(
+                        **base_preparation,
+                        chat_history=chat_history,
+                        context=[],
+                        context_metadata=[],
+                        sources=[],
+                        immediate_answer=no_data_answer,
+                    )
+                else:
+                    doc_id_set = {
+                        item["metadata"].get("doc_id")
+                        for item in selected_chunks
+                        if item["metadata"].get("doc_id") is not None
+                    }
+                    doc_name_map: dict[int, str] = {}
+                    if doc_id_set:
+                        docs_result = await session.exec(
+                            select(Document).where(Document.id.in_(doc_id_set))
+                        )
+                        for doc in docs_result.all():
+                            doc_name_map[doc.id] = doc.name
+
+                    sources: list[SourceItem] = []
+                    expanded_context = await expand_with_neighbors(
+                        selected_chunks, session
+                    )
+                    text_to_meta: dict[str, dict] = {}
+                    for item in selected_chunks:
+                        _meta = item["metadata"]
+                        _doc_id = _meta.get("doc_id")
+                        text_to_meta[item["text"]] = {
+                            "doc_name": _meta.get("doc_name")
+                            or doc_name_map.get(_doc_id),
+                            "page": _meta.get("page"),
+                        }
+
+                    filtered_context: list[str] = list(expanded_context)
+                    context_metadata: list[dict[str, Any]] = [
+                        text_to_meta.get(t, {}) for t in filtered_context
+                    ]
+                    for item in selected_chunks:
+                        chunk_text = item["text"]
+                        meta = item["metadata"]
+                        doc_id = meta.get("doc_id")
+                        doc_name = meta.get("doc_name") or doc_name_map.get(doc_id)
+                        page = meta.get("page")
+                        chunk_id = item["chunk_id"]
+                        quote = (chunk_text or "").strip().replace("\n", " ")
+                        if len(quote) > 240:
+                            quote = quote[:240].rstrip() + "..."
+                        if chunk_text not in filtered_context:
+                            filtered_context.append(chunk_text)
+                            context_metadata.append(
+                                {"doc_name": doc_name, "page": page}
+                            )
+                        sources.append(
+                            SourceItem(
+                                source_type="source",
+                                doc_id=doc_id,
+                                doc_name=doc_name,
+                                page=page,
+                                chunk_id=chunk_id,
+                                quote=quote or None,
+                            )
+                        )
+
+                    preparation = StreamChatPreparation(
+                        **base_preparation,
+                        chat_history=chat_history,
+                        context=filtered_context,
+                        context_metadata=context_metadata,
+                        sources=sources,
+                    )
+    except Exception as exc:
+        logger.exception("Streaming chat preparation failed")
+        payload: dict[str, Any] = {
+            "detail": str(exc) or "Chat preparation failed",
+        }
+        status_code = getattr(exc, "status_code", None)
+        if status_code:
+            payload["status"] = status_code
+        yield stream_event("error", payload)
+        return
+
+    if preparation.immediate_answer is not None:
+        answer = preparation.immediate_answer
+        sources = preparation.sources
+        if is_no_data_answer(answer):
+            sources = []
+        log_id, warning = await persist_chat_log_short_lived(
+            question=chat_request.question,
+            answer=answer,
+            sources=sources,
+            started=started,
+            user_id=user_id,
+            notebook_id=preparation.notebook_id,
+            domain_profile=preparation.domain_profile,
+        )
+        yield stream_event("token", {"token": answer})
+        done_payload = {
+            "answer": answer,
+            "sources": [item.model_dump() for item in sources],
+            "log_id": log_id,
+        }
+        if warning:
+            done_payload["warning"] = warning
+        yield stream_event("done", done_payload)
+        return
+
+    yield stream_event("status", {"stage": "generation"})
+
+    answer_parts: list[str] = []
+    try:
+        async for token in rag_service.stream_answer(
+            query=preparation.normalized_question,
+            context=preparation.context,
+            chat_history=preparation.chat_history,
+            language=preparation.language,
+            model=preparation.model,
+            assistant_name=preparation.assistant_name,
+            answer_rules=preparation.answer_rules,
+            no_data_answer=preparation.no_data_answer,
+            context_metadata=preparation.context_metadata,
+        ):
+            answer_parts.append(token)
+            yield stream_event("token", {"token": token})
+    except Exception as exc:
+        logger.exception("Streaming chat generation failed")
+        payload = {"detail": str(exc) or "Chat generation failed"}
+        status_code = getattr(exc, "status_code", None)
+        if status_code:
+            payload["status"] = status_code
+        yield stream_event("error", payload)
+        return
+
+    raw_answer = "".join(answer_parts)
+    answer = rag_service._sanitize_answer_text(raw_answer)
+    if not answer:
+        answer = rag_service._generation._fallback_from_context(
+            preparation.context, preparation.no_data_answer
+        )
+        yield stream_event("token", {"token": answer})
+
+    sources = preparation.sources
+    if is_no_data_answer(answer):
+        sources = []
+
+    log_id, warning = await persist_chat_log_short_lived(
+        question=chat_request.question,
+        answer=answer,
+        sources=sources,
+        started=started,
+        user_id=user_id,
+        notebook_id=preparation.notebook_id,
+        domain_profile=preparation.domain_profile,
+    )
+    done_payload = {
+        "answer": answer,
+        "sources": [item.model_dump() for item in sources],
+        "log_id": log_id,
+    }
+    if warning:
+        done_payload["warning"] = warning
+    yield stream_event("done", done_payload)
